@@ -1,0 +1,52 @@
+# env
+venv/
+.env/
+
+# Python
+__pycache__/
+*.pyc
+
+# log
+*.log
+!Asm*.log
+!PhG*.log
+!MIP*.log
+!Mono*.log
+!full_experiment.log
+!full_experiment_*.log
+*.out
+
+# output data
+*.csv
+!incr_exp_results_*.csv
+!experiment_results.csv
+!experiment_results_PB.csv
+*.lp
+*.wcnf
+*.meta
+*.asm
+results*/
+!results_analyze/
+!results_analyze/**
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# wsl
+*:Zone.Identifier
+
+# build artifacts
+*.o
+*.a
+*.so
+
+# SCIP suite (extracted files)
+UWrMaxSat-SCIP-MaxPre/code/scipoptsuite-*/
+
+# Minisat / Maxpre build dirs
+UWrMaxSat-SCIP-MaxPre/code/cominisatps/build/
+UWrMaxSat-SCIP-MaxPre/code/maxpre/build/
+UWrMaxSat-SCIP-MaxPre/code/uwrmaxsat/build/

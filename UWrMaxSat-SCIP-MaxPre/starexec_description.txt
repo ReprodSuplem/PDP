@@ -1,0 +1,5 @@
+UWrMaxSat ver. 1.6: a MaxSAT and PB solver created at University of Wroclaw 2019:2024, 
+based on MiniSatP by N. Een and N. Sorensson, with: 
+ the COMiniSatPS SAT solver by Chanseok Oh,
+ the SCIP solver, version 8.1.0, https://www.scipopt.org, and 
+ the MaxPre MaxSAT preprocessor by Tuukka Korhonen.
