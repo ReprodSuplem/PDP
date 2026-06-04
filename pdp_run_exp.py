@@ -10,8 +10,9 @@ import threading
 # Global Experiment Configuration
 # ==========================================
 INSTANCES = ["lc101", "lr101", "lrc101"]
-TIME_LIMIT = 3600  # Academic standard cutoff time
-MAX_WORKERS = 12   # Full utilization of available cores
+TIME_LIMIT = 3600
+MAX_WORKERS = 12
+K_VALUES = [3, 4, 5]
 
 progress_lock = threading.Lock()
 completed_tasks = 0
@@ -30,33 +31,34 @@ def prepare_data_and_get_tasks():
             print(f"  [Error] Benchmark file not found: {txt_file}")
             sys.exit(1)
             
-        print(f"  -> Slicing and processing {txt_file}...")
-        try:
-            subprocess.run(
-                f"python pdp_ins_arg.py {txt_file} .", 
-                shell=True, 
-                check=True,
-                stdout=subprocess.DEVNULL, 
-                stderr=subprocess.DEVNULL
-            )
-        except subprocess.CalledProcessError:
-            print(f"  [Error] Failed to generate data for {txt_file}")
-            sys.exit(1)
+        for k in K_VALUES:
+            print(f"  -> Slicing and processing {txt_file} for K={k}...")
+            try:
+                subprocess.run(
+                    f"python pdp_ins_arg.py {txt_file} . {k}", 
+                    shell=True, 
+                    check=True,
+                    stdout=subprocess.DEVNULL, 
+                    stderr=subprocess.DEVNULL
+                )
+            except subprocess.CalledProcessError:
+                print(f"  [Error] Failed to generate data for {txt_file} at K={k}")
+                sys.exit(1)
             
-        req_sizes = []
+        req_sizes = set()
         for filename in os.listdir("."):
             if filename.startswith("requestInfo") and filename.endswith(f"_{ins}.csv"):
                 size_str = filename.replace("requestInfo", "").replace(f"_{ins}.csv", "")
                 try:
-                    req_sizes.append(int(size_str))
+                    req_sizes.add(int(size_str))
                 except ValueError:
                     continue
                     
-        req_sizes.sort()
-        for req in req_sizes:
-            tasks.append((ins, req))
+        for req in sorted(list(req_sizes)):
+            for k in K_VALUES:
+                tasks.append((ins, req, k))
             
-    print(f"[Phase 1 Complete] Found {len(tasks)} instance-size combinations.\n")
+    print(f"[Phase 1 Complete] Found {len(tasks)} instance-size-k combinations.\n")
     return tasks
 
 # ==========================================
@@ -64,11 +66,11 @@ def prepare_data_and_get_tasks():
 # ==========================================
 def build_commands(task_list):
     cmds = []
-    for ins, req in task_list:
-        cmds.append(f"python pdp_main.py mip {ins} {req} --mip_strategy hybrid --time {TIME_LIMIT}")
-        cmds.append(f"python pdp_main.py mip {ins} {req} --mip_strategy full --time {TIME_LIMIT}")
-        cmds.append(f"python pdp_main.py cpsat {ins} {req} --time {TIME_LIMIT}")
-        cmds.append(f"python pdp_main.py sat {ins} {req} --time {TIME_LIMIT}")
+    for ins, req, k in task_list:
+        cmds.append(f"python pdp_main.py mip {ins} {req} --knn {k} --mip_strategy hybrid --time {TIME_LIMIT}")
+        cmds.append(f"python pdp_main.py mip {ins} {req} --knn {k} --mip_strategy full --time {TIME_LIMIT}")
+        cmds.append(f"python pdp_main.py cpsat {ins} {req} --knn {k} --time {TIME_LIMIT}")
+        cmds.append(f"python pdp_main.py sat {ins} {req} --knn {k} --time {TIME_LIMIT}")
     return cmds
 
 def worker(cmd):
@@ -94,7 +96,6 @@ def worker(cmd):
 def parse_and_export_results():
     print("\n[Phase 3: Results Parsing] Collecting data from log files...")
     try:
-        # Assuming pdp_results.py is adapted to scan the current directory
         subprocess.run(
             f"python pdp_results.py", 
             shell=True, 
@@ -109,10 +110,9 @@ def parse_and_export_results():
 # ==========================================
 if __name__ == "__main__":
     print("==================================================")
-    print("  PDP One-Click Experiment Pipeline")
+    print("  PDP Full Ablation Experiment Pipeline")
     print("==================================================")
     
-    # 1. Prepare data
     task_combinations = prepare_data_and_get_tasks()
     commands = build_commands(task_combinations)
     total_tasks = len(commands)
@@ -123,16 +123,13 @@ if __name__ == "__main__":
     print(f"  Concurrency : {MAX_WORKERS} cores")
     print("==================================================\n")
     
-    print("[Phase 2: Execution] Starting process pool... (Logs are routed to .out files)\n")
+    print("[Phase 2: Execution] Starting process pool...\n")
     
-    # 2. Concurrent execution
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(worker, cmd) for cmd in commands]
         concurrent.futures.wait(futures)
         
     print("\n[Phase 2 Complete] All solver tasks finished.")
-    
-    # 3. Automatic results parsing
     parse_and_export_results()
     
     print("\n==================================================")

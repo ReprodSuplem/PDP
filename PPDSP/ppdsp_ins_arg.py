@@ -3,7 +3,6 @@
 import sys
 import os
 import math
-import random
 import re
 import pandas as pd
 import networkx as nx
@@ -256,7 +255,7 @@ def gen_all_ins_arg(filepath: str, outDir: str = ".", seed: int = 42):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python ppdsp_ins_arg.py <file.vrp> [outDir]")
+        print("Usage: python ppdsp_ins_arg.py <file.vrp> [outDir] [seed] [k_nn]")
         sys.exit(1)
     
     vrp_file = sys.argv[1]
@@ -265,4 +264,22 @@ if __name__ == "__main__":
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
         
-    gen_all_ins_arg(vrp_file, outDir=out_dir)
+    seed_val = 42
+    if len(sys.argv) > 3:
+        try:
+            seed_val = int(sys.argv[3])
+        except ValueError:
+            pass
+            
+    k_val = 3
+    if len(sys.argv) > 4:
+        try:
+            k_val = int(sys.argv[4])
+        except ValueError:
+            print(f"[Warning] Invalid k_nn argument '{sys.argv[4]}', defaulting to 3")
+
+    import random
+    random.seed(seed_val)
+    print(f"[Init] Global Random Seed set to {seed_val} | K-NN set to {k_val}")
+
+    gen_all_ins_arg(vrp_file, outDir=out_dir, k_nn=k_val)

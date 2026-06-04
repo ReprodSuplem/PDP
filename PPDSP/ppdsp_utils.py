@@ -241,25 +241,33 @@ class PPDSP_utils:
     # Output visual representation of vehicle routes
     # ----------------------------
     @staticmethod
-    def printVehRoutes(self, filtered_model):
+    def printVehRoutes(self, filtered_model, log_file=None):
         vehRoutes = PPDSP_utils.decodeModel(self, filtered_model)
         depot = self.lenOfLocation
+        output_lines = []
         for vehID, info in vehRoutes.items():
             route = info['route']
             reqs  = info['requests']
             if not route:
-                print(f"Vehicle {vehID}: Depot, (requests = {reqs})")
+                output_lines.append(f"Vehicle {vehID}: Depot, (requests = {reqs})")
                 continue
             node_seq = [route[0][0]] + [d for (_, d) in route]
             node_seq_str = ["Depot" if n == depot else str(n) for n in node_seq]
             pretty_route = " → ".join(node_seq_str)
-            print(f"Vehicle {vehID}: {pretty_route}, (requests = {reqs})")
+            output_lines.append(f"Vehicle {vehID}: {pretty_route}, (requests = {reqs})")
+
+        output_str = "\n".join(output_lines)
+        print(output_str)
+
+        if log_file and os.path.exists(log_file):
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write("\n" + output_str + "\n")
 
     # ----------------------------
     # Evaluate PPDSP Objective Function
     # ----------------------------
     @staticmethod
-    def evaluateSolution(self, filtered_model):
+    def evaluateSolution(self, filtered_model, log_file=None):
         import math
         if self.id2Var is None:
             PPDSP_utils.buildVarIndexMap(self)
@@ -275,20 +283,28 @@ class PPDSP_utils:
             if varInfo[0] == 'x':
                 _, t, o, d = varInfo
                 if o != d:
-                    # Calculate actual Euclidean distance based on coordinates
-                    dist = math.dist(self.locaList[o], self.locaList[d])
-                    cost += int((self.vehicleList[t][1] * dist * 2 + 1) // 2)
+                    cost += self.my_round_int(self.vehicleList[t][1] * self.locaList[o][d])
             elif varInfo[0] == 'y':
                 _, r, t = varInfo
                 profit += self.requestList[r][0]
 
-        print("======== PPDSP SOLUTION EVALUATION ========")
-        print(f"Total Collected Profit = {profit}")
-        print(f"Total Routing Cost     = {cost}")
-        print(f"Objective Value    = {profit - cost}")
-        print("===========================================")
+        obj = profit - cost
+        
+        eval_lines = [
+            "======== PPDSP SOLUTION EVALUATION ========",
+            f"Total Collected Profit = {profit}",
+            f"Total Routing Cost     = {cost}",
+            f"Objective Value        = {obj}",
+            "==========================================="
+        ]
+        eval_str = "\n".join(eval_lines)
+        print(eval_str)
+        
+        if log_file and os.path.exists(log_file):
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(eval_str + "\n")
 
-        return profit - cost
+        return obj
 
     # ----------------------------
     # Compile metadata for UWrMaxSAT parser

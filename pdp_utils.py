@@ -197,9 +197,10 @@ class PDP_utils:
     # Output visual representation of vehicle routes
     # ----------------------------
     @staticmethod
-    def printVehRoutes(self, filtered_model):
+    def printVehRoutes(self, filtered_model, log_file=None):
         vehRoutes = PDP_utils.decodeModel(self, filtered_model)
         depot = self.lenOfLocation
+        output_lines = []
         for vehID, info in vehRoutes.items():
             route = info['route']
             reqs  = info['requests']
@@ -209,13 +210,20 @@ class PDP_utils:
             node_seq = [route[0][0]] + [d for (_, d) in route]
             node_seq_str = ["Depot" if n == depot else str(n) for n in node_seq]
             pretty_route = " → ".join(node_seq_str)
-            print(f"Vehicle {vehID}: {pretty_route}, (requests = {reqs})")
+            output_lines.append(f"Vehicle {vehID}: {pretty_route}, (requests = {reqs})")
+            
+        output_str = "\n".join(output_lines)
+        print(output_str)
+        
+        if log_file and os.path.exists(log_file):
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write("\n" + output_str + "\n")
 
     # ----------------------------
     # Evaluate Total Objective Cost
     # ----------------------------
     @staticmethod
-    def evaluateSolution(self, filtered_model):
+    def evaluateSolution(self, filtered_model, log_file=None):
         if self.id2Var is None:
             PDP_utils.buildVarIndexMap(self)
 
@@ -230,9 +238,18 @@ class PDP_utils:
                 _, t, o, d = varInfo
                 cost += self.my_round_int(self.vehicleList[t][1] * self.locaList[o][d])
 
-        print("======== SOLUTION EVALUATION ========")
-        print(f"Routing Cost (Total Distance) = {cost}")
-        print("=====================================")
+        eval_lines = [
+            "======== PDP SOLUTION EVALUATION ========",
+            f"Total Routing Cost     = {cost}",
+            f"Objective Value        = {cost}",
+            "========================================="
+        ]
+        eval_str = "\n".join(eval_lines)
+        print(eval_str)
+        
+        if log_file and os.path.exists(log_file):
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(eval_str + "\n")
 
         return cost
 

@@ -155,10 +155,17 @@ def process_pdp_benchmark(filepath: str, k_nn: int = 3, outDir: str = "."):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python pdp_ins_arg.py <benchmark.txt> [outDir]")
+        print("Usage: python pdp_ins_arg.py <benchmark.txt> [outDir] [k_nn]")
         sys.exit(1)
         
     file_path = sys.argv[1]
     out_dir = sys.argv[2] if len(sys.argv) > 2 else "."
     
-    process_pdp_benchmark(file_path, k_nn=3, outDir=out_dir)
+    k_val = 3
+    if len(sys.argv) > 3:
+        try:
+            k_val = int(sys.argv[3])
+        except ValueError:
+            print(f"[Warning] Invalid k_nn argument '{sys.argv[3]}', defaulting to 3")
+
+    process_pdp_benchmark(file_path, k_nn=k_val, outDir=out_dir)

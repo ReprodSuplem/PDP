@@ -1,84 +1,126 @@
-# pdp_results.py
-
 import os
 import re
 import pandas as pd
+import numpy as np
 
-def parse_experiments(directory="."):
-    """
-    Scans the specified directory for solver log files and extracts
-    the best objective value and total runtime for each experiment.
-    """
+def parse_log_file(filepath):
+    filename = os.path.basename(filepath)
+    match = re.match(r"pdp_(.*)_r(\d+)v(\d+)k(\d+)_(.*)\.out", filename)
+    if not match:
+        return None
+
+    instance = match.group(1)
+    reqs = int(match.group(2))
+    method = match.group(5).replace('.wcnf', '') 
+
+    obj = np.nan
+    bound = np.nan
+    time_val = np.nan
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+        if method == "maxsat":
+            obj_match = re.search(r"\[UWrMaxSAT\] OBJ:\s*([\d\.]+)", content)
+            if obj_match:
+                obj = float(obj_match.group(1))
+            time_match = re.search(r"CPU time\s*:\s*([\d\.]+)\s*s", content)
+            if time_match:
+                time_val = float(time_match.group(1))
+
+        elif method == "cpsat":
+            obj_match = re.search(r"objective:\s*([\d\.]+)", content)
+            bound_match = re.search(r"best_bound:\s*([\d\.]+)", content)
+            time_match = re.search(r"walltime:\s*([\d\.]+)", content)
+            
+            if obj_match: obj = float(obj_match.group(1))
+            if bound_match: bound = float(bound_match.group(1))
+            if time_match: time_val = float(time_match.group(1))
+
+        elif method in ["hybrid_bc", "full_bc"]:
+            obj_bound_match = re.search(r"Best objective ([\d\.]+), best bound ([\d\.]+)", content)
+            opt_match = re.search(r"Optimal objective\s+([\d\.\-]+)", content)
+            
+            if obj_bound_match:
+                obj = float(obj_bound_match.group(1))
+                bound = float(obj_bound_match.group(2))
+            elif opt_match:
+                obj = float(opt_match.group(1))
+                bound = obj
+                
+            time_match = re.search(r"Explored \d+ nodes .*? in ([\d\.]+) seconds", content)
+            if time_match:
+                time_val = float(time_match.group(1))
+
+        # Handle timeouts
+        if pd.isna(time_val):
+            if re.search(r"Time limit reached", content) or re.search(r"\[UWrMaxSAT\] Timeout", content):
+                time_val = 3600.0
+            else:
+                time_val = 3600.0 
+                
+        # If solved optimally within time limit, bound equals obj
+        if time_val < 3590 and pd.notna(obj):
+            bound = obj
+
+    return {
+        "Instance": instance,
+        "Requests": reqs,
+        "Method": method,
+        "Objective": obj,
+        "BestBound": bound,
+        "Time(s)": time_val
+    }
+
+def main():
+    log_dir = "."
     results = []
+
+    for filename in os.listdir(log_dir):
+        if filename.endswith(".out") and filename.startswith("pdp_"):
+            filepath = os.path.join(log_dir, filename)
+            res = parse_log_file(filepath)
+            if res:
+                results.append(res)
+
+    df = pd.DataFrame(results)
+    if df.empty:
+        print("No valid log files found.")
+        return
+
+    # Sort and prepare dynamic columns
+    df = df.sort_values(by=["Instance", "Requests", "Method"])
+    df['BKB'] = np.nan
+    df['Gap(%)'] = np.nan
+
+    # Dynamic BKB Calculation for Minimization (Pure PDP)
+    for (inst, req), group in df.groupby(['Instance', 'Requests']):
+        optimal_runs = group[(group['Time(s)'] < 3590) & (group['Objective'].notna())]
+        
+        if not optimal_runs.empty:
+            bkb = optimal_runs['Objective'].min()
+        else:
+            valid_bounds = group['BestBound'].dropna()
+            if not valid_bounds.empty:
+                bkb = valid_bounds.max() # Max Lower Bound
+            else:
+                bkb = np.nan
+                
+        df.loc[group.index, 'BKB'] = bkb
+        
+        for idx in group.index:
+            obj = df.loc[idx, 'Objective']
+            if pd.notna(obj) and pd.notna(bkb) and obj > 0:
+                gap = ((obj - bkb) / obj) * 100.0
+                df.loc[idx, 'Gap(%)'] = max(0.0, round(gap, 2))
+
+    # Reorder columns for clean CSV
+    cols = ['Instance', 'Requests', 'Method', 'Objective', 'BestBound', 'BKB', 'Gap(%)', 'Time(s)']
+    df = df[cols]
     
-    # Regex to match filenames, e.g.: pdp_lc101_r10v25k3_cpsat.out or pdp_lc101_r10v25k3_maxsat.wcnf.out
-    file_pattern = re.compile(
-        r"pdp_(?P<inst>[^_]+)_r(?P<req>\d+)v(?P<veh>\d+)k(?P<knn>\d+)_(?P<method>cpsat|full_bc|hybrid_bc|maxsat\.wcnf)\.out"
-    )
-
-    if not os.path.exists(directory):
-        print(f"[Error] Directory '{directory}' not found.")
-        return pd.DataFrame()
-
-    for filename in os.listdir(directory):
-        match = file_pattern.match(filename)
-        if not match:
-            continue
-            
-        inst = match.group("inst")
-        req = int(match.group("req"))
-        veh = int(match.group("veh"))
-        method = match.group("method").replace(".wcnf", "")
-        
-        filepath = os.path.join(directory, filename)
-        
-        obj = None
-        time = None
-        
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-            
-            if method == "cpsat":
-                m_obj = re.search(r"\[CP-SAT\] FINAL OBJ:\s*([\d\.]+)", content)
-                m_time = re.search(r"\[CP-SAT\] Total Runtime:\s*([\d\.]+)", content)
-                if m_obj: obj = float(m_obj.group(1))
-                if m_time: time = float(m_time.group(1))
-                    
-            elif method in ["full_bc", "hybrid_bc"]:
-                # Use re.IGNORECASE to support different naming conventions
-                m_obj = re.search(r"\[Gurobi.*?\] BEST OBJ:\s*([0-9\.]+)", content, re.IGNORECASE)
-                m_time = re.search(r"\[Gurobi.*?\] Runtime:\s*([\d\.]+)", content, re.IGNORECASE)
-                if m_obj: obj = float(m_obj.group(1))
-                if m_time: time = float(m_time.group(1))
-                    
-            elif method == "maxsat":
-                m_obj = re.search(r"\[UWrMaxSAT\] OBJ:\s*([\d\.]+)", content)
-                m_time = re.search(r"c CPU time\s*:\s*([\d\.]+)\s*s", content)
-                if m_obj: obj = float(m_obj.group(1))
-                if m_time: time = float(m_time.group(1))
-        
-        results.append({
-            "Instance": inst,
-            "Requests": req,
-            "Vehicles": veh,
-            "Method": method,
-            "Objective": obj,
-            "Time(s)": time
-        })
-
-    return pd.DataFrame(results)
+    output_file = "pdp_results.csv"
+    df.to_csv(output_file, index=False)
+    print(f"Results successfully parsed and saved to {output_file}")
 
 if __name__ == "__main__":
-    print("[Parse] Starting log parsing in the current directory...")
-    df = parse_experiments(directory=".")
-    
-    if df.empty:
-        print("[Parse] No valid log files found in the current directory.")
-        exit(1)
-
-    # Save the flat base data directly to pdp_results.csv
-    output_csv = "pdp_results.csv"
-    df.sort_values(by=["Instance", "Requests", "Vehicles", "Method"], inplace=True)
-    df.to_csv(output_csv, index=False)
-    
-    print(f"[Parse] Data parsing completed successfully. Results saved to {output_csv}")
+    main()
