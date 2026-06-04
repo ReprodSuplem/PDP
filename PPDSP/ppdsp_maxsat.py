@@ -269,8 +269,8 @@ class PPDSP_MaxSAT(PPDSP_reform):
 
         filtered_model = PPDSP_utils.extractXYModel(self, model)
 
-        PPDSP_utils.printVehRoutes(self, filtered_model)
-        obj_val = PPDSP_utils.evaluateSolution(self, filtered_model)
+        PPDSP_utils.printVehRoutes(self, filtered_model, log_file)
+        obj_val = PPDSP_utils.evaluateSolution(self, filtered_model, log_file)
 
         with open(log_file, "a") as f:
             f.write(f"[UWrMaxSAT] OBJ: {obj_val}\n")

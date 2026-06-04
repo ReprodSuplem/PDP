@@ -326,8 +326,8 @@ class PPDSP_MIP(PPDSP_reform):
             log(f"[Gurobi] Runtime: {elapsed:.3f} sec")
             log(f"[Gurobi] Gap: {self.model.MIPGap * 100:.2f}%")
             
-            PPDSP_utils.printVehRoutes(self, filtered_model)
-            PPDSP_utils.evaluateSolution(self, filtered_model)
+            PPDSP_utils.printVehRoutes(self, filtered_model, log_file)
+            PPDSP_utils.evaluateSolution(self, filtered_model, log_file)
             
             log("===== RAW XY MODEL =====")
             log(" ".join(str(v) for v in filtered_model))

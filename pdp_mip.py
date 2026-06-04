@@ -347,8 +347,8 @@ class PDP_MIP(PDP_reform):
                     log(f"[Gurobi {self.bc_strategy}] BEST BOUND: {self.m.ObjBound}")
                     log(f"[Gurobi {self.bc_strategy}] Runtime: {elapsed:.3f} sec")
                     
-                    PDP_utils.printVehRoutes(self, filtered_model)
-                    PDP_utils.evaluateSolution(self, filtered_model)
+                    PDP_utils.printVehRoutes(self, filtered_model, log_file)
+                    PDP_utils.evaluateSolution(self, filtered_model, log_file)
                     return filtered_model
                 else:
                     log(f"[Gurobi {self.bc_strategy}] Reached Time Limit, NO feasible solution.")

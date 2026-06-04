@@ -212,8 +212,8 @@ class PDP_CPSAT(PDP_reform):
             log(f"[CP-SAT] FINAL OBJ: {solver.ObjectiveValue()}")
             log(f"[CP-SAT] Total Runtime: {elapsed:.3f} sec")
             
-            PDP_utils.printVehRoutes(self, filtered_model)
-            PDP_utils.evaluateSolution(self, filtered_model)
+            PDP_utils.printVehRoutes(self, filtered_model, log_file)
+            PDP_utils.evaluateSolution(self, filtered_model, log_file)
             
             log("===== RAW XY MODEL =====")
             log(" ".join(str(v) for v in filtered_model))

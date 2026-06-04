@@ -257,8 +257,8 @@ class PDP_MaxSAT(PDP_reform):
 
         filtered_model = PDP_utils.extractXYModel(self, model)
 
-        PDP_utils.printVehRoutes(self, filtered_model)
-        obj_val = PDP_utils.evaluateSolution(self, filtered_model)
+        PDP_utils.printVehRoutes(self, filtered_model, log_file)
+        obj_val = PDP_utils.evaluateSolution(self, filtered_model, log_file)
 
         with open(log_file, "a") as f:
             f.write(f"[UWrMaxSAT] OBJ: {obj_val}")
