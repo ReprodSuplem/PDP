@@ -1,5 +1,7 @@
 # pdp_utils.py
 
+import os
+
 class GlobalVariableRegistry:
 
     # ==========================================
@@ -39,7 +41,6 @@ class PDP_utils:
         Extract xVars and yVars from the log file to generate a standard assumption file.
         Maintains compatibility with both MaxSAT (.wcnf.out) and MIP (.out) log structures.
         """
-        import os
         if not os.path.exists(log_file):
             print(f"  [Warning] Log file {log_file} not found.")
             return False

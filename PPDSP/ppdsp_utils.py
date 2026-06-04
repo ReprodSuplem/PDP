@@ -1,5 +1,7 @@
 # ppdsp_utils.py
 
+import os
+
 class GlobalVariableRegistry:
 
     # ==========================================
@@ -35,7 +37,6 @@ class PPDSP_utils:
     # ----------------------------
     @staticmethod
     def parse_and_save_assumption(log_file, assumption_file, lastY, mode):
-        import os
         if not os.path.exists(log_file):
             print(f"  [Warning] Log file {log_file} not found.")
             return False
