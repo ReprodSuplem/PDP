@@ -329,26 +329,33 @@ class PDP_MIP(PDP_reform):
                 
             start_time = time.time()
             
+            # Initialize history tracker to positive infinity
             self.best_incumbent_obj = float('inf')
 
             def combined_callback(model, where):
-                if where == gp.GRB.Callback.MIPSOL:
-                    obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
-                    bnd = model.cbGet(gp.GRB.Callback.MIPSOL_OBJBND)
+                # 1. Capture genuine, valid Incumbent updates
+                if where == gp.GRB.Callback.MIP:
+                    # Use MIP_OBJBST to get the best objective AFTER lazy constraints validation
+                    obj_bst = model.cbGet(gp.GRB.Callback.MIP_OBJBST)
+                    bnd = model.cbGet(gp.GRB.Callback.MIP_OBJBND)
                     runtime = model.cbGet(gp.GRB.Callback.RUNTIME)
-                
-                if obj < self.best_incumbent_obj:
-                    self.best_incumbent_obj = obj
                     
-                    gap_str = "N/A"
-                    if abs(obj) > 1e-5: 
-                        gap = abs(obj - bnd) / abs(obj) * 100.0
-                        gap_str = f"{gap:.2f}%"
+                    # Ensure a valid solution is found (Gurobi initializes with 1e100)
+                    # Only log if it strictly improves upon our recorded best
+                    if obj_bst < self.best_incumbent_obj and obj_bst < 1e99:
+                        self.best_incumbent_obj = obj_bst
                         
-                    with open(log_file, "a") as cb_f:
-                        cb_f.write(f"[Incumbent] Time: {runtime:.2f}s | Obj: {obj:.1f} | Bound: {bnd:.1f} | Gap: {gap_str}\n")
+                        gap_str = "N/A"
+                        if abs(obj_bst) > 1e-5: 
+                            gap = abs(obj_bst - bnd) / abs(obj_bst) * 100.0
+                            gap_str = f"{gap:.2f}%"
                             
-                # Route execution based on the chosen Benders strategy
+                        # Log with [Incumbent] to match the parser regex
+                        with open(log_file, "a") as cb_f:
+                            cb_f.write(f"[Incumbent] Time: {runtime:.2f}s | Obj: {obj_bst:.1f} | Bound: {bnd:.1f} | Gap: {gap_str}\n")
+                                
+                # 2. Route execution based on the chosen Benders strategy
+                # This must be OUTSIDE the `if where == MIP` block so Lazy Constraints trigger correctly
                 if self.bc_strategy == 'hybrid':
                     self.hybrid_benders_callback(model, where)
                 elif self.bc_strategy == 'full':
