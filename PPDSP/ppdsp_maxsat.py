@@ -1,7 +1,6 @@
 # ppdsp_maxsat.py
 
 import os
-import math
 from ppdsp_ins_gen import PPDSP_reform
 from ppdsp_utils import PPDSP_utils
 from pysat.pb import *
@@ -42,10 +41,9 @@ class PPDSP_MaxSAT(PPDSP_reform):
             for j in range(1+self.lenOfLocation):
                 for k in range(1+self.lenOfLocation):
                     if k != j:
-                        if self.adjMatrix[j][k] == 0: continue
-                        dist = math.dist(self.locaList[j], self.locaList[k])
-                        cost = self.my_round_int(self.vehicleList[i][1] * dist)
-                        self.wcnf.append([-self.xVarList[i][j][k]], weight=cost)
+                        cost = self.my_round_int(self.vehicleList[i][1] * self.locaList[j][k])
+                        if cost > 0:
+                            self.wcnf.append([-self.xVarList[i][j][k]], weight=cost)
 
         # 2. Profit Penalties: If a request is NOT served, we pay the penalty (lost profit).
         for r in range(self.lenOfRequest):
@@ -74,7 +72,7 @@ class PPDSP_MaxSAT(PPDSP_reform):
                 varList = [-self.yVarList[i][j]]
                 for k in range(1+self.lenOfLocation):
                     if k != pickup and k != dropoff:
-                        if self.adjMatrix[k][pickup] != 0:
+                        if self.adjMatrx[k][pickup] != 0:
                             varList.append(self.xVarList[j][k][pickup])
                 self.wcnf.append(varList)
 
@@ -86,7 +84,7 @@ class PPDSP_MaxSAT(PPDSP_reform):
                 varList = [-self.yVarList[i][j]]
                 for k in range(self.lenOfLocation):
                     if k != dropoff:
-                        if self.adjMatrix[k][dropoff] != 0:
+                        if self.adjMatrx[k][dropoff] != 0:
                             varList.append(self.xVarList[j][k][dropoff])
                 self.wcnf.append(varList)
 
@@ -97,9 +95,9 @@ class PPDSP_MaxSAT(PPDSP_reform):
                 litList1 = []
                 litList2 = []
                 for k in range(1+self.lenOfLocation):
-                    if k != j and self.adjMatrix[j][k] != 0:
+                    if k != j and self.adjMatrx[j][k] != 0:
                         litList1.append(self.xVarList[i][j][k])
-                    if k != j and self.adjMatrix[k][j] != 0:
+                    if k != j and self.adjMatrx[k][j] != 0:
                         litList2.append(self.xVarList[i][k][j])
                 cnf_obj = self.twoSumsEqvt(litList1, litList2)
                 for clause in cnf_obj:
@@ -131,7 +129,7 @@ class PPDSP_MaxSAT(PPDSP_reform):
             for j in range(self.lenOfLocation):
                 for k in range(self.lenOfLocation):
                     if j == k: continue
-                    if self.adjMatrix[j][k] == 0: continue 
+                    if self.adjMatrx[j][k] == 0: continue 
                     for p in range(num_bits):
                         clause = [-self.xVarList[t][j][k], -self.nuVarList[t][k][p]]
                         if p > 0:
@@ -165,9 +163,9 @@ class PPDSP_MaxSAT(PPDSP_reform):
     # Valid Inequality: k-NN Sparsification
     def genHardClauseForKnn(self): 
         for t in range(self.lenOfVehicle):
-            for i in range(len(self.adjMatrix)):
-                for j in range(len(self.adjMatrix[i])):
-                    if self.adjMatrix[i][j] == 0:
+            for i in range(len(self.adjMatrx)):
+                for j in range(len(self.adjMatrx[i])):
+                    if self.adjMatrx[i][j] == 0:
                         x_var = self.xVarList[t][i][j]
                         self.wcnf.append([-x_var])
 
@@ -208,7 +206,7 @@ class PPDSP_MaxSAT(PPDSP_reform):
             any_req_lits = [self.yVarList[r][t] for r in range(self.lenOfRequest)]
             for i in range(1+self.lenOfLocation):
                 for j in range(1+self.lenOfLocation):
-                    if i != j and self.adjMatrix[i][j] != 0:
+                    if i != j and self.adjMatrx[i][j] != 0:
                         x_var = self.xVarList[t][i][j]
                         self.wcnf.append([-x_var] + any_req_lits)
 

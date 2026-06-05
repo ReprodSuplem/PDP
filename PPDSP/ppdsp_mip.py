@@ -2,7 +2,6 @@
 
 import os
 import time
-import math
 import gurobipy as gp
 from gurobipy import GRB
 from ppdsp_ins_gen import PPDSP_reform
@@ -45,7 +44,7 @@ class PPDSP_MIP(PPDSP_reform):
                 for j in range(num_nodes):
                     if i == j:
                         self.x[t, i, i] = self.model.addVar(vtype=GRB.BINARY, name=f"x_t{t}_i{i}_j{i}")
-                    elif self.adjMatrix[i][j] != 0:
+                    elif self.adjMatrx[i][j] != 0:
                         self.x[t, i, j] = self.model.addVar(vtype=GRB.BINARY, name=f"x_t{t}_i{i}_j{j}")
                     else:
                         self.x[t, i, j] = None
@@ -67,8 +66,7 @@ class PPDSP_MIP(PPDSP_reform):
             for i in range(num_nodes):
                 for j in range(num_nodes):
                     if i != j and self.x[t, i, j] is not None:
-                        dist = math.dist(self.locaList[i], self.locaList[j])
-                        cost = self.my_round_int(veh_cost * dist)
+                        cost = self.my_round_int(veh_cost * self.locaList[i][j])
                         obj_expr.addTerms(-cost, self.x[t, i, j])
 
         self.model.setObjective(obj_expr, GRB.MAXIMIZE)
@@ -277,7 +275,8 @@ class PPDSP_MIP(PPDSP_reform):
     def solve(self, time_limit=3600):
         self.genMipModel()
         
-        self.model.Params.TimeLimit = time_limit
+        if time_limit is not None:
+            self.model.Params.TimeLimit = time_limit
         self.model.Params.Threads = 1
         self.model.Params.LazyConstraints = 1
         
@@ -287,22 +286,43 @@ class PPDSP_MIP(PPDSP_reform):
         self.model._bc_strategy = self.bc_strategy
         
         print(f"[MIP] Starting Gurobi optimization for {self.insName} (Strategy: {self.bc_strategy.upper()})")
-        start_time = time.time()
         
-        self.model.optimize(self.benders_callback)
-        
-        elapsed = time.time() - start_time
-        
+        # Initialize the log file BEFORE optimization so the callback can append to it
         log_file = f"{self.insName}.out"
+        with open(log_file, "w") as f:
+            f.write(f"--- Starting MIP for {self.insName} ---\n")
+            
         def log(msg):
             print(msg)
             with open(log_file, "a") as f:
                 f.write(msg + "\n")
                 
-        with open(log_file, "w") as f:
-            f.write(f"--- Starting MIP for {self.insName} ---\n")
+        start_time = time.time()
+        
+        # Combined callback: logs incumbent updates AND executes your lazy constraints
+        def combined_callback(model, where):
+            if where == gp.GRB.Callback.MIPSOL:
+                obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
+                bnd = model.cbGet(gp.GRB.Callback.MIPSOL_OBJBND)
+                runtime = model.cbGet(gp.GRB.Callback.RUNTIME)
+                
+                # Calculate relative gap for maximization problem
+                gap_str = "N/A"
+                if abs(obj) > 1e-5: 
+                    gap = abs(bnd - obj) / abs(obj) * 100.0
+                    gap_str = f"{gap:.2f}%"
+                    
+                with open(log_file, "a") as cb_f:
+                    cb_f.write(f"[MIP Incumbent] Time: {runtime:.2f}s | Obj: {obj} | Bound: {bnd} | Gap: {gap_str}\n")
             
-        if self.model.Status == GRB.OPTIMAL or self.model.SolCount > 0:
+            # Route execution to the Benders decomposition callback
+            self.benders_callback(model, where)
+
+        self.model.optimize(combined_callback)
+        
+        elapsed = time.time() - start_time
+        
+        if self.model.Status == gp.GRB.OPTIMAL or self.model.SolCount > 0:
             raw_model = []
             
             for t in range(self.lenOfVehicle):
@@ -323,8 +343,12 @@ class PPDSP_MIP(PPDSP_reform):
             
             log(f"[Gurobi] Status: {self.model.Status}")
             log(f"[Gurobi] BEST OBJ: {self.model.ObjVal}")
+            log(f"[Gurobi] BEST BOUND: {self.model.ObjBound}")
             log(f"[Gurobi] Runtime: {elapsed:.3f} sec")
-            log(f"[Gurobi] Gap: {self.model.MIPGap * 100:.2f}%")
+            try:
+                log(f"[Gurobi] Gap: {self.model.MIPGap * 100:.2f}%")
+            except AttributeError:
+                pass
             
             PPDSP_utils.printVehRoutes(self, filtered_model, log_file)
             PPDSP_utils.evaluateSolution(self, filtered_model, log_file)
@@ -337,4 +361,9 @@ class PPDSP_MIP(PPDSP_reform):
             log(f"[Gurobi] Status: {self.model.Status}")
             log("[Gurobi] No feasible solution found.")
             log(f"[Gurobi] Runtime: {elapsed:.3f} sec")
+            try:
+                best_bound = self.model.ObjBound
+                log(f"[Gurobi] BEST OBJ: -, BEST BOUND: {best_bound}")
+            except AttributeError:
+                pass
             return None

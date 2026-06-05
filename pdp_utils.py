@@ -237,7 +237,8 @@ class PDP_utils:
 
             if varInfo[0] == 'x':
                 _, t, o, d = varInfo
-                cost += self.my_round_int(self.vehicleList[t][1] * self.locaList[o][d])
+                if o != d:
+                    cost += self.my_round_int(self.vehicleList[t][1] * self.locaList[o][d])
 
         eval_lines = [
             "======== PDP SOLUTION EVALUATION ========",

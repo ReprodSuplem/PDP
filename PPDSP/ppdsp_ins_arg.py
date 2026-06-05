@@ -6,6 +6,7 @@ import math
 import re
 import pandas as pd
 import networkx as nx
+import random
 from typing import List, Tuple
 
 def my_round_int(x: float) -> int:
@@ -183,7 +184,7 @@ def gen_adj_matrs(coords: List[Tuple[float, float]], start_k: int, sizeOfGList: 
     for i in range(lenOfCoord):
         all_dists[i][i] = (0, i)
         for j in range(i + 1, lenOfCoord):
-            dist = math.dist(coords[i], coords[j])
+            dist = my_round_int(math.dist(coords[i], coords[j]))
             G_complete.add_edge(i, j, weight=dist)
             all_dists[i][j] = (dist, j)
             all_dists[j][i] = (dist, i)
@@ -209,6 +210,7 @@ def gen_adj_matrs(coords: List[Tuple[float, float]], start_k: int, sizeOfGList: 
         for i in range(lenOfCoord):
             adjMatrix[depot_idx][i] = 1
             adjMatrix[i][depot_idx] = 1
+            adjMatrix[i][i] = 0
 
         df = pd.DataFrame(adjMatrix)
         df.to_csv(f'{outDir}/adjMatrx{current_k}_{instance_name}.csv', header=False, index=False)
@@ -226,7 +228,7 @@ def gen_vehic_caps(k_veh: int, capacity: int, instance_name: str, outDir: str = 
     df = pd.DataFrame(vehicleList, columns=['VehicleID', 'Capacity', 'CostFactor'])
     df.to_csv(csv_filename, index=False)
 
-def gen_all_ins_arg(filepath: str, outDir: str = ".", seed: int = 42):
+def gen_all_ins_arg(filepath: str, outDir: str = ".", seed: int = 42, k_nn: int = 3):
     """
     Master Pipeline: Generates PPDSP benchmark files strictly derived from CVRP instances.
     """
@@ -242,7 +244,7 @@ def gen_all_ins_arg(filepath: str, outDir: str = ".", seed: int = 42):
     coords, instance_name = read_cvrp_coords(filepath)
     
     write_nodes_csv(coords, instance_name, outDir=outDir)
-    gen_adj_matrs(coords, start_k=3, sizeOfGList=1, skip=1, instance_name=instance_name, outDir=outDir)
+    gen_adj_matrs(coords, start_k=k_nn, sizeOfGList=1, skip=1, instance_name=instance_name, outDir=outDir)
     gen_vehic_caps(k_veh, capacity, instance_name, outDir=outDir)
     
     requestList = gen_request_list(coords, demands_pool, target_demand, seed=seed)
@@ -278,8 +280,7 @@ if __name__ == "__main__":
         except ValueError:
             print(f"[Warning] Invalid k_nn argument '{sys.argv[4]}', defaulting to 3")
 
-    import random
     random.seed(seed_val)
     print(f"[Init] Global Random Seed set to {seed_val} | K-NN set to {k_val}")
 
-    gen_all_ins_arg(vrp_file, outDir=out_dir, k_nn=k_val)
+    gen_all_ins_arg(vrp_file, outDir=out_dir, seed=seed_val, k_nn=k_val)

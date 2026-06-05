@@ -3,7 +3,6 @@
 from ppdsp_ins_gen import PPDSP_reform
 from ppdsp_utils import PPDSP_utils
 import time
-import math
 from ortools.sat.python import cp_model
 
 class SolutionLogger(cp_model.CpSolverSolutionCallback):
@@ -70,7 +69,7 @@ class PPDSP_CPSAT(PPDSP_reform):
                 for j in range(num_nodes):
                     if i == j: 
                         self.x[t, i, i] = self.model.NewBoolVar(f'x_t{t}_i{i}_j{i}')
-                    elif self.adjMatrix[i][j] != 0:
+                    elif self.adjMatrx[i][j] != 0:
                         self.x[t, i, j] = self.model.NewBoolVar(f'x_t{t}_i{i}_j{j}')
 
         # ==================== Base Constraints ====================
@@ -163,8 +162,7 @@ class PPDSP_CPSAT(PPDSP_reform):
             for i in range(num_nodes):
                 for j in range(num_nodes):
                     if i != j and (t, i, j) in self.x:
-                        dist = math.dist(self.locaList[i], self.locaList[j])
-                        cost = self.my_round_int(veh_cost * dist)
+                        cost = self.my_round_int(veh_cost * self.locaList[i][j])
                         obj_terms.append(-cost * self.x[t, i, j])
 
         self.model.Maximize(sum(obj_terms))

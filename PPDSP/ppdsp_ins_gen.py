@@ -2,15 +2,11 @@
 
 import os
 import sys
+import math
 import pandas as pd
 from pysat.formula import IDPool
-from ppdsp_utils import GlobalVariableRegistry
 
 class PPDSP_reform:
-    """
-    Data integration and master variable generation layer for PPDSP.
-    Serves as the base class for MIP, CP-SAT, and MaxSAT engines.
-    """
     def __init__(self, pdpName: str, num_reqs: int, num_vehs: int, capacity: int, knn: int = 3, increment=None):
         self.registry = increment
         self.varID = 0
@@ -23,7 +19,8 @@ class PPDSP_reform:
         self.capacity = int(capacity)
         self.knn = int(knn)
 
-        self.adjMatrix = []
+        self.adjMatrx = []
+        self.coordinates = []
         self.locaList = []
         self.requestList = []
         self.vehicleList = []
@@ -34,21 +31,21 @@ class PPDSP_reform:
         
         self.readCSV()
         
-        # Dimensions setup
         self.lenOfLocation = len(self.locaList) - 1 
         self.lenOfRequest = len(self.requestList)
         self.lenOfVehicle = len(self.vehicleList)
         
-        # Initialize empty variable tensors
         self.xVarList = [[[0] * (1 + self.lenOfLocation) for _ in range(1 + self.lenOfLocation)] for _ in range(self.lenOfVehicle)]
         self.yVarList = [[0] * self.lenOfVehicle for _ in range(self.lenOfRequest)]
         
-        # Auxiliary variables for MTZ, positional encodings, and capacity
         self.nuVarList = [[[0] * self.lenOfLocation for _ in range(1 + self.lenOfLocation)] for _ in range(self.lenOfVehicle)]
         self.uVarList = [[0] * (1 + self.lenOfLocation) for _ in range(self.lenOfVehicle)]
         self.hVarList = [[0] * (1 + self.lenOfLocation) for _ in range(self.lenOfVehicle)]
         
         self.genVariables()
+
+    def my_round_int(self, x: float) -> int:
+        return int((x * 2 + 1) // 2)
 
     def readCSV(self):
         veh_file = f"vehicleInfo{self.num_vehs}_{self.pdpName}.csv"
@@ -58,34 +55,44 @@ class PPDSP_reform:
             
         veh_df = pd.read_csv(veh_file)
         for _, row in veh_df.iterrows():
-            cap = int(float(row.iloc[1]))
+            cap = self.my_round_int(float(row.iloc[1]))
             cost_factor = float(row.iloc[2])
             self.vehicleList.append([cap, cost_factor])
                 
         node_file = f"2DNode_{self.pdpName}.csv"
-        node_df = pd.read_csv(node_file, header=None)
-        for _, row in node_df.iterrows():
-            self.locaList.append([float(row.iloc[0]), float(row.iloc[1])])
-                
-        # PPDSP specific extraction: Profit, Size, Pickup, Dropoff
-        req_file = f"requestInfo{self.num_reqs}_{self.pdpName}.csv"
-        req_df = pd.read_csv(req_file, header=None)
-        for _, row in req_df.iterrows():
-            profit = int(float(row.iloc[0]))
-            size = int(float(row.iloc[1]))
-            pk = int(float(row.iloc[2]))
-            dp = int(float(row.iloc[3]))
-            self.requestList.append([profit, size, pk, dp])
-                
+        self.coordinates = pd.read_csv(node_file, header=None).values.tolist()
+        self.lenOfCoord = len(self.coordinates)
+
         adj_file = f"adjMatrx{self.knn}_{self.pdpName}.csv"
         adj_df = pd.read_csv(adj_file, header=None)
         for _, row in adj_df.iterrows():
-            self.adjMatrix.append([int(float(val)) for val in row])
+            self.adjMatrx.append([self.my_round_int(float(val)) for val in row])
 
-    # ========================== Utilities ==========================
+        for i in range(self.lenOfCoord):
+            tmpList = []
+            for j in range(self.lenOfCoord):
+                if self.adjMatrx[i][j] == 0: # block
+                    tmpList.append(999999)
+                elif self.adjMatrx[i][j] == 2: # free
+                    tmpList.append(0)
+                elif self.adjMatrx[i][j] == 1: # edge
+                    tmpList.append(
+                        self.my_round_int(
+                            math.dist((self.coordinates[i][0], self.coordinates[i][1]),
+                                      (self.coordinates[j][0], self.coordinates[j][1]))))
+            self.locaList.append(tmpList)
 
-    def my_round_int(self, x: float) -> int:
-        return int((x * 2 + 1) // 2)
+        self.floyd(self.locaList)
+        self.lenOfLocation = self.lenOfCoord - 1
+
+        req_file = f"requestInfo{self.num_reqs}_{self.pdpName}.csv"
+        req_df = pd.read_csv(req_file, header=None)
+        for _, row in req_df.iterrows():
+            profit = self.my_round_int(float(row.iloc[0]))
+            size = self.my_round_int(float(row.iloc[1]))
+            pk = self.my_round_int(float(row.iloc[2]))
+            dp = self.my_round_int(float(row.iloc[3]))
+            self.requestList.append([profit, size, pk, dp])
 
     def floyd(self, tmpMatrix):
         for i in range(len(tmpMatrix)):

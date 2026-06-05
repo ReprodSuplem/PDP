@@ -269,7 +269,6 @@ class PPDSP_utils:
     # ----------------------------
     @staticmethod
     def evaluateSolution(self, filtered_model, log_file=None):
-        import math
         if self.id2Var is None:
             PPDSP_utils.buildVarIndexMap(self)
 

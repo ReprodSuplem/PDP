@@ -329,15 +329,33 @@ class PDP_MIP(PDP_reform):
                 
             start_time = time.time()
             
-            # Callback Routing based on strategy
-            if self.bc_strategy == 'hybrid':
-                self.m.optimize(self.hybrid_benders_callback)
-            elif self.bc_strategy == 'full':
-                self.m.optimize(self.full_benders_callback)
+            def combined_callback(model, where):
+                if where == gp.GRB.Callback.MIPSOL:
+                    obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
+                    bnd = model.cbGet(gp.GRB.Callback.MIPSOL_OBJBND)
+                    runtime = model.cbGet(gp.GRB.Callback.RUNTIME)
+                    
+                    # Calculate relative gap for minimization problem
+                    gap_str = "N/A"
+                    if abs(obj) > 1e-5: 
+                        gap = abs(obj - bnd) / abs(obj) * 100.0
+                        gap_str = f"{gap:.2f}%"
+                        
+                    with open(log_file, "a") as cb_f:
+                        cb_f.write(f"[MIP Incumbent] Time: {runtime:.2f}s | Obj: {obj} | Bound: {bnd} | Gap: {gap_str}\n")
+                            
+                # Route execution based on the chosen Benders strategy
+                if self.bc_strategy == 'hybrid':
+                    self.hybrid_benders_callback(model, where)
+                elif self.bc_strategy == 'full':
+                    self.full_benders_callback(model, where)
+
+            # Callback Routing based on strategy using the combined callback
+            self.m.optimize(combined_callback)
             
             elapsed = time.time() - start_time
 
-            if self.m.Status == GRB.OPTIMAL or self.m.Status == GRB.TIME_LIMIT:
+            if self.m.Status == gp.GRB.OPTIMAL or self.m.Status == gp.GRB.TIME_LIMIT:
                 if self.m.SolCount > 0:
                     raw_model = [v.VarName for v in self.m.getVars() if v.X > 0.5 and (v.VarName.startswith('x') or v.VarName.startswith('y'))]
                     filtered_model = PDP_utils.convert_model(raw_model)
@@ -352,6 +370,11 @@ class PDP_MIP(PDP_reform):
                     return filtered_model
                 else:
                     log(f"[Gurobi {self.bc_strategy}] Reached Time Limit, NO feasible solution.")
+                    try:
+                        best_bound = self.m.ObjBound
+                        log(f"Best objective -, best bound {best_bound}")
+                    except:
+                        pass
             else:
                 log(f"[Gurobi {self.bc_strategy}] Failed to find solution. Status: {self.m.Status}")
             return None
