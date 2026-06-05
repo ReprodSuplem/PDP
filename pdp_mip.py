@@ -329,20 +329,24 @@ class PDP_MIP(PDP_reform):
                 
             start_time = time.time()
             
+            self.best_incumbent_obj = float('inf')
+
             def combined_callback(model, where):
                 if where == gp.GRB.Callback.MIPSOL:
                     obj = model.cbGet(gp.GRB.Callback.MIPSOL_OBJ)
                     bnd = model.cbGet(gp.GRB.Callback.MIPSOL_OBJBND)
                     runtime = model.cbGet(gp.GRB.Callback.RUNTIME)
+                
+                if obj < self.best_incumbent_obj:
+                    self.best_incumbent_obj = obj
                     
-                    # Calculate relative gap for minimization problem
                     gap_str = "N/A"
                     if abs(obj) > 1e-5: 
                         gap = abs(obj - bnd) / abs(obj) * 100.0
                         gap_str = f"{gap:.2f}%"
                         
                     with open(log_file, "a") as cb_f:
-                        cb_f.write(f"[MIP Incumbent] Time: {runtime:.2f}s | Obj: {obj} | Bound: {bnd} | Gap: {gap_str}\n")
+                        cb_f.write(f"[Incumbent] Time: {runtime:.2f}s | Obj: {obj:.1f} | Bound: {bnd:.1f} | Gap: {gap_str}\n")
                             
                 # Route execution based on the chosen Benders strategy
                 if self.bc_strategy == 'hybrid':
