@@ -23,11 +23,11 @@ def parse_log_file(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
 
-        # Check for explicit timeout indicators in the log
+        # Check for explicit timeout indicators
         if re.search(r"Time limit reached", content) or re.search(r"\[UWrMaxSAT\] Timeout", content) or re.search(r"NO feasible solution", content):
             is_timeout = True
 
-        # Extract Objective and Bound based on the solver
+        # Extract Objective and Bound
         if method == "maxsat":
             obj_match = re.search(r"\[UWrMaxSAT\] OBJ:\s*([\d\.]+)", content)
             if obj_match:
@@ -42,7 +42,7 @@ def parse_log_file(filepath):
             if obj_match: obj = float(obj_match.group(1))
             if bound_match: bound = float(bound_match.group(1))
 
-        elif method in ["hybrid_bc", "full_bc"]:
+        elif method in ["static", "hybrid_bc", "full_bc"]:
             obj_bound_match = re.search(r"BEST OBJ:\s*([-\d\.]+).*?BEST BOUND:\s*([-\d\.]+)", content, re.DOTALL)
             opt_match = re.search(r"Optimal objective\s+([\d\.\-]+)", content)
             
@@ -55,51 +55,46 @@ def parse_log_file(filepath):
                 obj = float(opt_match.group(1))
                 bound = obj
 
-        # Extract the time of the best incumbent
-        if pd.notna(obj):
-            if method == "maxsat":
-                matches = re.findall(r"c \[Elapsed time\]\s*([\d\.]+)\s*s\s*c Found solution:\s*([\d\.]+)", content)
-                for t_str, o_str in matches:
-                    if abs(float(o_str) - obj) < 1e-5:
-                        incumbent_time = float(t_str)
-                        break
-            elif method == "cpsat":
-                matches = re.findall(r"\[Incumbent\s*\d+\] Time:\s*([\d\.]+)s\s*\|\s*Obj:\s*([\d\.]+)", content)
-                for t_str, o_str in matches:
-                    if abs(float(o_str) - obj) < 1e-5:
-                        incumbent_time = float(t_str)
-                        break
-            elif method in ["hybrid_bc", "full_bc"]:
-                matches = re.findall(r"\[MIP Incumbent\] Time:\s*([\d\.]+)s\s*\|\s*Obj:\s*([\d\.]+)", content)
-                for t_str, o_str in matches:
-                    if abs(float(o_str) - obj) < 1e-5:
-                        incumbent_time = float(t_str)
-                        break
-
-        # Extract the total solver runtime to accurately determine timeout
+        # Extract Total Time
         if method == "maxsat":
             time_match = re.search(r"CPU time\s*:\s*([\d\.]+)\s*s", content)
             if time_match: total_time = float(time_match.group(1))
         elif method == "cpsat":
             time_match = re.search(r"\[CP-SAT\] Total Runtime:\s*([\d\.]+)\s*sec", content)
             if time_match: total_time = float(time_match.group(1))
-        elif method in ["hybrid_bc", "full_bc"]:
+        elif method in ["static", "hybrid_bc", "full_bc"]:
             time_match = re.search(r"Runtime:\s*([\d\.]+)\s*sec", content)
             if time_match: total_time = float(time_match.group(1))
 
-        # Finalize timeout logic
+        # Adjust timeout flag based on total time
         if total_time is not None and total_time >= 3590.0:
             is_timeout = True
             
-        # Determine the reporting time
-        if incumbent_time is not None:
-            time_val = incumbent_time
-        elif total_time is not None:
-            time_val = total_time
-        else:
-            time_val = 3600.0 if is_timeout else np.nan
+        if total_time is None and is_timeout:
+            total_time = 3600.0
 
-        # Assign bound if optimality was proven
+        # Extract Time to Best Incumbent
+        if pd.notna(obj):
+            if method == "maxsat":
+                matches = re.findall(r"c \[Elapsed time\]\s*([\d\.]+)\s*s\s*c Found solution:\s*([-\d\.]+)", content)
+                if matches:
+                    incumbent_time = float(matches[-1][0])
+                elif re.search(r"c Found solution:", content):
+                    incumbent_time = 0.01 # Instant first solution without elapsed time print
+            elif method == "cpsat":
+                matches = re.findall(r"\[Incumbent\s*\d+\] Time:\s*([\d\.]+)s", content)
+                if matches:
+                    incumbent_time = float(matches[-1])
+            elif method in ["static", "hybrid_bc", "full_bc"]:
+                matches = re.findall(r"\[(?:MIP )?Incumbent\] Time:\s*([\d\.]+)s", content)
+                if matches:
+                    incumbent_time = float(matches[-1])
+                        
+            # Fallback: if no incumbent log matched, use total time
+            if incumbent_time is None and total_time is not None:
+                incumbent_time = total_time
+
+        # Assign bound if optimality was proven and no explicit bound was logged
         if not is_timeout and pd.notna(obj) and pd.isna(bound):
             bound = obj
 
@@ -112,9 +107,10 @@ def parse_log_file(filepath):
         "Method": method,
         "HasFeasible": has_feasible,
         "Timeout": is_timeout,
-        "Objective(NetProfit)": obj,
+        "Objective": obj,
         "BestBound": bound,
-        "Time(s)": time_val
+        "Time_to_Best(s)": incumbent_time,
+        "Total_Time(s)": total_time
     }
 
 def main():
@@ -139,10 +135,10 @@ def main():
 
     # Dynamic BKB Calculation for Maximization
     for (inst, req, k_val), group in df.groupby(['Instance', 'Requests', 'K']):
-        optimal_runs = group[(group['Timeout'] == False) & (group['Objective(NetProfit)'].notna())]
+        optimal_runs = group[(group['Timeout'] == False) & (group['Objective'].notna())]
         
         if not optimal_runs.empty:
-            bkb = optimal_runs['Objective(NetProfit)'].max()
+            bkb = optimal_runs['Objective'].max()
         else:
             valid_bounds = group['BestBound'].dropna()
             if not valid_bounds.empty:
@@ -153,12 +149,12 @@ def main():
         df.loc[group.index, 'BKB'] = bkb
         
         for idx in group.index:
-            obj = df.loc[idx, 'Objective(NetProfit)']
+            obj = df.loc[idx, 'Objective']
             if pd.notna(obj) and pd.notna(bkb) and obj > 0:
                 gap = ((bkb - obj) / obj) * 100.0
                 df.loc[idx, 'Gap(%)'] = max(0.0, round(gap, 2))
 
-    cols = ['Instance', 'Requests', 'K', 'Method', 'HasFeasible', 'Timeout', 'Objective(NetProfit)', 'BestBound', 'BKB', 'Gap(%)', 'Time(s)']
+    cols = ['Instance', 'Requests', 'K', 'Method', 'HasFeasible', 'Timeout', 'Objective', 'BestBound', 'BKB', 'Gap(%)', 'Time_to_Best(s)', 'Total_Time(s)']
     df = df[cols]
     
     output_file = "ppdsp_results.csv"

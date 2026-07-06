@@ -17,7 +17,8 @@ class PPDSP_MIP(PPDSP_reform):
         self.env.start()
         self.model = gp.Model(f"PPDSP_{pdpName}", env=self.env)
         
-        self.insName = f"ppdsp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_{self.bc_strategy}_bc"
+        strategy_suffix = "static" if self.bc_strategy == 'static' else f"{self.bc_strategy}_bc"
+        self.insName = f"ppdsp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_{strategy_suffix}"
         
         self.y = {} 
         self.x = {} 
@@ -33,13 +34,20 @@ class PPDSP_MIP(PPDSP_reform):
         num_vehs = self.lenOfVehicle
 
         # ==================== Variable Declaration ====================
+        cap = self.vehicleList[0][0]
+        if self.bc_strategy == 'static':
+            self.h = {}
+
         for t in range(num_vehs):
             for r in range(num_reqs):
                 self.y[r, t] = self.model.addVar(vtype=GRB.BINARY, name=f"y_r{r}_t{t}")
                 
             for i in range(num_nodes):
-                if self.bc_strategy == 'hybrid':
+                if self.bc_strategy in ['static', 'hybrid']:
                     self.u[t, i] = self.model.addVar(lb=0, ub=num_nodes, vtype=GRB.CONTINUOUS, name=f"u_t{t}_i{i}")
+                
+                if self.bc_strategy == 'static':
+                    self.h[t, i] = self.model.addVar(lb=0, ub=cap, vtype=GRB.CONTINUOUS, name=f"h_t{t}_i{i}")
                     
                 for j in range(num_nodes):
                     if i == j:
@@ -104,8 +112,8 @@ class PPDSP_MIP(PPDSP_reform):
             self.model.addConstr(depot_out == is_used, name=f"c6_depot_out_t{t}")
             self.model.addConstr(depot_in == is_used, name=f"c7_depot_in_t{t}")
 
-        # MTZ Valid Inequalities (Hybrid mode only)
-        if self.bc_strategy == 'hybrid':
+        # MTZ Subtour & Precedence
+        if self.bc_strategy in ['static', 'hybrid']:
             for t in range(num_vehs):
                 self.model.addConstr(self.u[t, DEPOT] == 0)
                 for i in range(num_nodes):
@@ -125,6 +133,34 @@ class PPDSP_MIP(PPDSP_reform):
                             self.u[t, p_node] <= self.u[t, d_node] - 1 + num_nodes * (1 - self.y[r, t]),
                             name=f"prec_t{t}_r{r}"
                         )
+                        
+        # Tight Bilateral Bounding
+        if self.bc_strategy == 'static':
+            node_demand = {i: 0 for i in range(num_nodes)}
+            total_q = sum(self.requestList[r][1] for r in range(num_reqs))
+            M = cap + min(cap, total_q)
+
+            for r in range(num_reqs):
+                pk = self.requestList[r][2]
+                dp = self.requestList[r][3]
+                dem = self.requestList[r][1]
+                node_demand[pk] += dem
+                node_demand[dp] -= dem
+
+            for t in range(num_vehs):
+                self.model.addConstr(self.h[t, DEPOT] == 0)
+                for i in range(num_nodes):
+                    for j in range(num_nodes):
+                        if i != j and self.x[t, i, j] is not None:
+                            delta_j = node_demand[j]
+                            self.model.addConstr(
+                                self.h[t, j] - self.h[t, i] >= delta_j - M * (1 - self.x[t, i, j]),
+                                name=f"cap_lb_t{t}_i{i}_j{j}"
+                            )
+                            self.model.addConstr(
+                                self.h[t, j] - self.h[t, i] <= delta_j + M * (1 - self.x[t, i, j]),
+                                name=f"cap_ub_t{t}_i{i}_j{j}"
+                            )
 
         # Symmetry Breaking
         for t in range(1, num_vehs):

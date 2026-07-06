@@ -20,7 +20,8 @@ class PDP_MIP(PDP_reform):
         self.env.start()
         
         # Semantic model naming for academic rigorousness
-        self.model_name = f"pdp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_{self.bc_strategy}_bc"
+        strategy_suffix = "static" if self.bc_strategy == 'static' else f"{self.bc_strategy}_bc"
+        self.model_name = f"pdp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_{strategy_suffix}"
         self.m = gp.Model(self.model_name, env=self.env)
         self.insName = self.model_name
         
@@ -45,16 +46,22 @@ class PDP_MIP(PDP_reform):
         n = self.lenOfLocation
 
         # ==================== Variable Declaration ====================
+        cap = int(self.vehicleList[0][0])
+        if self.bc_strategy == 'static':
+            self.h = {}
+            
         for t in range(num_vehs):
             for r in range(num_reqs):
                 var_id = self.yVarList[r][t]
                 self.y[r, t] = self.m.addVar(vtype=GRB.BINARY, name=f"y{var_id}")
             
             for i in range(num_nodes):
-                if self.bc_strategy == 'hybrid' and i < self.lenOfLocation:
+                if self.bc_strategy in ['static', 'hybrid'] and i < self.lenOfLocation:
                     u_id = self.uVarList[t][i]
-                    # Continuous relaxation for MTZ yields identical integer bounds but solves much faster
                     self.u[t, i] = self.m.addVar(lb=0, ub=n-1, vtype=GRB.CONTINUOUS, name=f"u{u_id}")
+                
+                if self.bc_strategy == 'static':
+                    self.h[t, i] = self.m.addVar(lb=0, ub=cap, vtype=GRB.CONTINUOUS, name=f"h_{t}_{i}")
                 
                 for j in range(num_nodes):
                     if i != j and self.adjMatrx[i][j] != 0:
@@ -94,7 +101,7 @@ class PDP_MIP(PDP_reform):
                 self.m.addConstr(gp.quicksum(out_edges) <= 1)
 
         # ==================== Strategy-Specific Topologies ====================
-        if self.bc_strategy == 'hybrid':
+        if self.bc_strategy in ['static', 'hybrid']:
             # Eq.7: MTZ Subtour Elimination 
             for t in range(num_vehs):
                 for j in range(self.lenOfLocation):
@@ -109,6 +116,31 @@ class PDP_MIP(PDP_reform):
                 if pickup != dropoff:
                     for t in range(num_vehs):
                         self.m.addConstr(self.u[t, pickup] - self.u[t, dropoff] + n * self.y[r, t] <= n - 1)
+
+        if self.bc_strategy == 'static':
+            node_demand = {i: 0 for i in range(num_nodes)}
+            total_q = sum(self.requestList[r][0] for r in range(num_reqs))
+            M = cap + min(cap, total_q)
+            
+            for r in range(num_reqs):
+                pk = self.requestList[r][1]
+                dp = self.requestList[r][2]
+                node_demand[pk] += self.requestList[r][0]
+                node_demand[dp] -= self.requestList[r][0]
+
+            # Eq. Capacity: Tight Bilateral Bounding
+            for t in range(num_vehs):
+                self.m.addConstr(self.h[t, self.DEPOT] == 0)
+                for i in range(num_nodes):
+                    for j in range(num_nodes):
+                        if i != j and (t, i, j) in self.x:
+                            delta_j = node_demand[j]
+                            self.m.addConstr(
+                                self.h[t, j] - self.h[t, i] >= delta_j - M * (1 - self.x[t, i, j])
+                            )
+                            self.m.addConstr(
+                                self.h[t, j] - self.h[t, i] <= delta_j + M * (1 - self.x[t, i, j])
+                            )
 
         # ==================== Model Enhancements (Valid Inequalities) ====================
         

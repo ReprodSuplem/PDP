@@ -20,7 +20,8 @@ INSTANCES = [
 
 TIME_LIMIT = 3600
 MAX_WORKERS = 12
-METHODS = ["cpsat", "maxsat", "hybrid_bc", "full_bc"]
+#METHODS = ["cpsat", "maxsat", "hybrid_bc", "full_bc"]
+METHODS = ["static"]
 K_VALUES = [3, 4, 5]
 GLOBAL_SEED = 42
 
@@ -81,14 +82,16 @@ def main():
     for k in K_VALUES:
         for inst, req in inst_to_req.items():
             for method in METHODS:
-                if method == "maxsat":
-                    cmd = f"python ppdsp_main.py sat {inst} {req} --knn {k} --time {TIME_LIMIT}"
-                elif method == "cpsat":
-                    cmd = f"python ppdsp_main.py cpsat {inst} {req} --knn {k} --time {TIME_LIMIT}"
-                elif method == "hybrid_bc":
-                    cmd = f"python ppdsp_main.py mip {inst} {req} --knn {k} --mip_strategy hybrid --time {TIME_LIMIT}"
-                elif method == "full_bc":
-                    cmd = f"python ppdsp_main.py mip {inst} {req} --knn {k} --mip_strategy full --time {TIME_LIMIT}"
+                if method == "static":
+                    cmd = f"python ppdsp_main.py mip {inst} {req} --knn {k} --mip_strategy static --time {TIME_LIMIT}"
+                #if method == "maxsat":
+                #    cmd = f"python ppdsp_main.py sat {inst} {req} --knn {k} --time {TIME_LIMIT}"
+                #elif method == "cpsat":
+                #    cmd = f"python ppdsp_main.py cpsat {inst} {req} --knn {k} --time {TIME_LIMIT}"
+                #elif method == "hybrid_bc":
+                #    cmd = f"python ppdsp_main.py mip {inst} {req} --knn {k} --mip_strategy hybrid --time {TIME_LIMIT}"
+                #elif method == "full_bc":
+                #    cmd = f"python ppdsp_main.py mip {inst} {req} --knn {k} --mip_strategy full --time {TIME_LIMIT}"
                 else:
                     continue
                 tasks.append(cmd)

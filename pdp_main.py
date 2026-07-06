@@ -12,8 +12,8 @@ from pdp_cpsat import PDP_CPSAT
 def main():
     parser = argparse.ArgumentParser(description="Exact Solvers Testbed for Pure PDP")
     parser.add_argument("solver", choices=["mip", "sat", "cpsat"], help="Choose the exact solver")
-    parser.add_argument("--mip_strategy", type=str, choices=['hybrid', 'full'], default='hybrid', 
-                    help="Choose Benders Cut strategy for MIP: 'hybrid' (MTZ+Cap) or 'full' (Pure Lazy)")
+    parser.add_argument("--mip_strategy", type=str, choices=['static', 'hybrid', 'full'], default='hybrid', 
+                    help="Choose Benders Cut strategy for MIP: 'static' (Pure Static), 'hybrid' (MTZ+Cap LCG), or 'full' (Pure Lazy)")
     parser.add_argument("instance", type=str, help="Benchmark name without extension (e.g., lc101)")
     parser.add_argument("reqs", type=int, help="Number of truncated requests to test (e.g., 20, 35)")
     parser.add_argument("--vehs", type=int, default=None, help="Override benchmark global fleet size (optional)")
