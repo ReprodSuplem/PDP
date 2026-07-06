@@ -15,7 +15,6 @@ To run the scripts and solvers, ensure you have the following dependencies insta
 - `python-sat` (PySAT toolkit)
 - `networkx`
 - `pandas`
-- `tsplib95`
 
 **External Solver Requirement:**
 The MaxSAT models rely on `uwrmaxsat`. You must compile `uwrmaxsat` and ensure its executable is available in your system's `PATH`.
