@@ -46,15 +46,15 @@ class PDP_MaxSAT(PDP_reform):
                         self.wcnf.append([-self.xVarList[i][j][k]], weight=cost)
 
     # Eq.2: Mandatory Request Assignment (Exactly-One)
-    def genHardClauseForEq2(self):
+    def genHardClauseForMandatoryAssignment(self):
         for i in range(self.lenOfRequest):
             varList = []
             for j in range(self.lenOfVehicle):
                 varList.append(self.yVarList[i][j])
             self.exactlyOne(varList)
 
-    # Eq.3: Node Visitation Linkage (Pickup)
-    def genHardClauseForEq3(self):
+    # Node Visitation Linkage (Pickup)
+    def genHardClauseForPickupLinkage(self):
         for i in range(self.lenOfRequest):
             pickup = self.requestList[i][1]
             dropoff = self.requestList[i][2]
@@ -66,20 +66,20 @@ class PDP_MaxSAT(PDP_reform):
                             varList.append(self.xVarList[j][k][pickup])
                 self.wcnf.append(varList)
 
-    # Eq.4: Node Visitation Linkage (Dropoff)
-    def genHardClauseForEq4(self):
+    # Node Visitation Linkage (Dropoff)
+    def genHardClauseForDropoffLinkage(self):
         for i in range(self.lenOfRequest):
             dropoff = self.requestList[i][2]
             for j in range(self.lenOfVehicle):
                 varList = [-self.yVarList[i][j]]
-                for k in range(self.lenOfLocation):
+                for k in range(1+self.lenOfLocation):
                     if k != dropoff:
                         if self.adjMatrx[k][dropoff] != 0:
                             varList.append(self.xVarList[j][k][dropoff])
                 self.wcnf.append(varList)
 
-    # Eq.5: Flow Balance Constraint
-    def genHardClauseForEq5(self):
+    # Flow Balance Constraint
+    def genHardClauseForFlowBalance(self):
         for i in range(self.lenOfVehicle):
             for j in range(1+self.lenOfLocation):
                 litList1 = []
@@ -93,8 +93,8 @@ class PDP_MaxSAT(PDP_reform):
                 for clause in cnf_obj:
                     self.wcnf.append(clause)
 
-    # Eq.6: Degree Constraint (Out-degree <= 1)
-    def genHardClauseForEq6(self):
+    # Degree Constraint (Out-degree <= 1)
+    def genHardClauseForDegreeConstraint(self):
         for i in range(self.lenOfVehicle):
             for j in range(1+self.lenOfLocation):
                 varList = []
@@ -206,11 +206,11 @@ class PDP_MaxSAT(PDP_reform):
         self.genNuVarList()
 
         self.genSoftClause()
-        self.genHardClauseForEq2()
-        self.genHardClauseForEq3()
-        self.genHardClauseForEq4()
-        self.genHardClauseForEq5()
-        self.genHardClauseForEq6()
+        self.genHardClauseForMandatoryAssignment()
+        self.genHardClauseForPickupLinkage()
+        self.genHardClauseForDropoffLinkage()
+        self.genHardClauseForFlowBalance()
+        self.genHardClauseForDegreeConstraint()
         
         self.genHardClauseForDomainTransitive()
         self.genHardClauseForEq7()

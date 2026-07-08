@@ -33,44 +33,56 @@ class PPDSP_CPSAT(PPDSP_reform):
     def __init__(self, pdpName, num_reqs, num_vehs, capacity, knn, increment=None):
         super().__init__(pdpName, num_reqs, num_vehs, capacity, knn, increment)
         self.knn = int(knn)
+        
         self.model = cp_model.CpModel()
+        
+        # Semantic model naming for academic rigorousness
         self.insName = f"ppdsp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_cpsat"
         
         # Variable dictionaries mapped to CP-SAT variables
-        self.y = {}      
         self.x = {}      
-        self.active = {} 
+        self.y = {}      
         self.pos = {}    
         self.load = {}   
         self.delta = {}  
+        self.active = {} 
 
     def genCpModel(self):
         # Generate essential variables only. U and H are omitted as they are redundant in CP-SAT.
         self.genXVarList()
         self.genYVarList()
 
+        # Strict symmetry with MIP models
+        self.DEPOT = self.lenOfLocation
         num_nodes = 1 + self.lenOfLocation
-        DEPOT = self.lenOfLocation
         num_reqs = self.lenOfRequest
         num_vehs = self.lenOfVehicle
+        n = self.lenOfLocation
 
         # ==================== Variable Declaration ====================
         for t in range(num_vehs):
             cap = int(self.vehicleList[t][0])
             for r in range(num_reqs):
-                self.y[r, t] = self.model.NewBoolVar(f'y_r{r}_t{t}')
+                # IDPool alignment for CP-SAT internal naming
+                var_id = self.yVarList[r][t]
+                self.y[r, t] = self.model.NewBoolVar(f'y{var_id}')
 
             for i in range(num_nodes):
                 self.active[t, i] = self.model.NewBoolVar(f'act_t{t}_i{i}')
-                self.pos[t, i] = self.model.NewIntVar(0, num_nodes, f'pos_t{t}_i{i}')
+                
+                if i != self.DEPOT:
+                    self.pos[t, i] = self.model.NewIntVar(0, n - 1, f'pos_t{t}_i{i}')
+                    
                 self.load[t, i] = self.model.NewIntVar(0, cap, f'load_t{t}_i{i}')
                 self.delta[t, i] = self.model.NewIntVar(-cap, cap, f'delta_t{t}_i{i}')
 
                 for j in range(num_nodes):
                     if i == j: 
-                        self.x[t, i, i] = self.model.NewBoolVar(f'x_t{t}_i{i}_j{i}')
+                        var_id = self.xVarList[t][i][i]
+                        self.x[t, i, i] = self.model.NewBoolVar(f'x{var_id}')
                     elif self.adjMatrx[i][j] != 0:
-                        self.x[t, i, j] = self.model.NewBoolVar(f'x_t{t}_i{i}_j{j}')
+                        var_id = self.xVarList[t][i][j]
+                        self.x[t, i, j] = self.model.NewBoolVar(f'x{var_id}')
 
         # ==================== Base Constraints ====================
         
@@ -80,16 +92,15 @@ class PPDSP_CPSAT(PPDSP_reform):
 
         # PPDSP Eq.3 & Eq.4 mapping: Node Activation and Net Demand (Delta) Logic
         for t in range(num_vehs):
-            self.model.Add(self.load[t, DEPOT] == 0)  
-            self.model.Add(self.delta[t, DEPOT] == 0)
-            self.model.Add(self.pos[t, DEPOT] == 0)   
+            self.model.Add(self.load[t, self.DEPOT] == 0)  
+            self.model.Add(self.delta[t, self.DEPOT] == 0)
 
             is_used = self.model.NewBoolVar(f'is_used_t{t}')
             self.model.AddMaxEquality(is_used, [self.y[r, t] for r in range(num_reqs)])
-            self.model.Add(self.x[t, DEPOT, DEPOT] == is_used.Not()) 
+            self.model.Add(self.x[t, self.DEPOT, self.DEPOT] == is_used.Not()) 
 
             for i in range(num_nodes):
-                if i != DEPOT:
+                if i != self.DEPOT:
                     self.model.Add(self.x[t, i, i] == self.active[t, i].Not())
                     
                     # PPDSP Request extraction: [profit, size, pk, dp]
@@ -115,11 +126,10 @@ class PPDSP_CPSAT(PPDSP_reform):
                 for j in range(num_nodes):
                     if i != j and (t, i, j) in self.x:
                         arcs.append((i, j, self.x[t, i, j]))
-                        
-                        if j != DEPOT:
-                            self.model.Add(self.pos[t, j] == self.pos[t, i] + 1).OnlyEnforceIf(self.x[t, i, j])
+                        if j != self.DEPOT:
+                            if i != self.DEPOT:
+                                self.model.Add(self.pos[t, j] == self.pos[t, i] + 1).OnlyEnforceIf(self.x[t, i, j])
                             self.model.Add(self.load[t, j] == self.load[t, i] + self.delta[t, j]).OnlyEnforceIf(self.x[t, i, j])
-
             self.model.AddCircuit(arcs)
 
             # Eq.8 mapping: Physical Precedence Constraint

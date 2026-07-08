@@ -68,10 +68,10 @@ def build_commands(task_list):
     cmds = []
     for ins, req, k in task_list:
         cmds.append(f"python pdp_main.py mip {ins} {req} --knn {k} --mip_strategy static --time {TIME_LIMIT}")
-        #cmds.append(f"python pdp_main.py mip {ins} {req} --knn {k} --mip_strategy hybrid --time {TIME_LIMIT}")
-        #cmds.append(f"python pdp_main.py mip {ins} {req} --knn {k} --mip_strategy full --time {TIME_LIMIT}")
-        #cmds.append(f"python pdp_main.py cpsat {ins} {req} --knn {k} --time {TIME_LIMIT}")
-        #cmds.append(f"python pdp_main.py sat {ins} {req} --knn {k} --time {TIME_LIMIT}")
+        cmds.append(f"python pdp_main.py mip {ins} {req} --knn {k} --mip_strategy hybrid --time {TIME_LIMIT}")
+        cmds.append(f"python pdp_main.py mip {ins} {req} --knn {k} --mip_strategy full --time {TIME_LIMIT}")
+        cmds.append(f"python pdp_main.py cpsat {ins} {req} --knn {k} --time {TIME_LIMIT}")
+        cmds.append(f"python pdp_main.py sat {ins} {req} --knn {k} --time {TIME_LIMIT}")
     return cmds
 
 def worker(cmd):

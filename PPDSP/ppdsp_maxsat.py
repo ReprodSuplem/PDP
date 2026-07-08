@@ -63,8 +63,8 @@ class PPDSP_MaxSAT(PPDSP_reform):
             # Changed from exactlyOne to atMostOne to allow unserved requests
             self.atMostOne(varList)
 
-    # Eq.3: Node Visitation Linkage (Pickup)
-    def genHardClauseForEq3(self):
+    # Node Visitation Linkage (Pickup)
+    def genHardClauseForPickupLinkage(self):
         for i in range(self.lenOfRequest):
             pickup = self.requestList[i][2]
             dropoff = self.requestList[i][3]
@@ -76,8 +76,8 @@ class PPDSP_MaxSAT(PPDSP_reform):
                             varList.append(self.xVarList[j][k][pickup])
                 self.wcnf.append(varList)
 
-    # Eq.4: Node Visitation Linkage (Dropoff)
-    def genHardClauseForEq4(self):
+    # Node Visitation Linkage (Dropoff)
+    def genHardClauseForDropoffLinkage(self):
         for i in range(self.lenOfRequest):
             dropoff = self.requestList[i][3]
             for j in range(self.lenOfVehicle):
@@ -88,8 +88,8 @@ class PPDSP_MaxSAT(PPDSP_reform):
                             varList.append(self.xVarList[j][k][dropoff])
                 self.wcnf.append(varList)
 
-    # Eq.5: Flow Balance Constraint
-    def genHardClauseForEq5(self):
+    # Flow Balance Constraint
+    def genHardClauseForFlowBalance(self):
         for i in range(self.lenOfVehicle):
             for j in range(1+self.lenOfLocation):
                 litList1 = []
@@ -103,8 +103,8 @@ class PPDSP_MaxSAT(PPDSP_reform):
                 for clause in cnf_obj:
                     self.wcnf.append(clause)
 
-    # Eq.6: Degree Constraint (Out-degree <= 1)
-    def genHardClauseForEq6(self):
+    # Degree Constraint (Out-degree <= 1)
+    def genHardClauseForDegreeConstraint(self):
         for i in range(self.lenOfVehicle):
             for j in range(1+self.lenOfLocation):
                 varList = []
@@ -121,7 +121,7 @@ class PPDSP_MaxSAT(PPDSP_reform):
                 for p in range(num_bits - 1):
                     self.wcnf.append([-self.nuVarList[t][i][p], self.nuVarList[t][i][p+1]])
 
-    # Eq.7: Subtour Elimination (via Order Encoding)
+    # Eq.7: MTZ Subtour Elimination (via Order Encoding)
     def genHardClauseForEq7(self): 
         num_bits = self.lenOfLocation - 1 
         last_bit_idx = num_bits - 1 
@@ -217,10 +217,10 @@ class PPDSP_MaxSAT(PPDSP_reform):
 
         self.genSoftClause()
         self.genHardClauseForSelection()
-        self.genHardClauseForEq3()
-        self.genHardClauseForEq4()
-        self.genHardClauseForEq5()
-        self.genHardClauseForEq6()
+        self.genHardClauseForPickupLinkage()
+        self.genHardClauseForDropoffLinkage()
+        self.genHardClauseForFlowBalance()
+        self.genHardClauseForDegreeConstraint()
         
         self.genHardClauseForDomainTransitive()
         self.genHardClauseForEq7()

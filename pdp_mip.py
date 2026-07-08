@@ -21,25 +21,24 @@ class PDP_MIP(PDP_reform):
         
         # Semantic model naming for academic rigorousness
         strategy_suffix = "static" if self.bc_strategy == 'static' else f"{self.bc_strategy}_bc"
-        self.model_name = f"pdp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_{strategy_suffix}"
-        self.m = gp.Model(self.model_name, env=self.env)
-        self.insName = self.model_name
+        self.insName = f"pdp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_{strategy_suffix}"
+        self.model = gp.Model(self.insName, env=self.env)
         
-        # Enable Lazy Constraints (Required for both strategies)
-        self.m.Params.LazyConstraints = 1
-
         self.x = {}
         self.y = {}
-        self.u = {} 
-        self.DEPOT = self.lenOfLocation
+        self.u = {}
+        self.h = {}
 
-    def genGurobiModel(self):
+    def genMipModel(self):
         self.genXVarList()
         self.genYVarList()
         
-        if self.bc_strategy == 'hybrid':
+        if self.bc_strategy in ['hybrid', 'static']:
             self.genUVarList()
+        if self.bc_strategy == 'static':
+            self.genHVarList()
 
+        self.DEPOT = self.lenOfLocation
         num_nodes = 1 + self.lenOfLocation
         num_reqs = self.lenOfRequest
         num_vehs = self.lenOfVehicle
@@ -47,26 +46,25 @@ class PDP_MIP(PDP_reform):
 
         # ==================== Variable Declaration ====================
         cap = int(self.vehicleList[0][0])
-        if self.bc_strategy == 'static':
-            self.h = {}
             
         for t in range(num_vehs):
             for r in range(num_reqs):
                 var_id = self.yVarList[r][t]
-                self.y[r, t] = self.m.addVar(vtype=GRB.BINARY, name=f"y{var_id}")
+                self.y[r, t] = self.model.addVar(vtype=GRB.BINARY, name=f"y{var_id}")
             
             for i in range(num_nodes):
                 if self.bc_strategy in ['static', 'hybrid'] and i < self.lenOfLocation:
                     u_id = self.uVarList[t][i]
-                    self.u[t, i] = self.m.addVar(lb=0, ub=n-1, vtype=GRB.CONTINUOUS, name=f"u{u_id}")
+                    self.u[t, i] = self.model.addVar(lb=0, ub=n-1, vtype=GRB.CONTINUOUS, name=f"u{u_id}")
                 
                 if self.bc_strategy == 'static':
-                    self.h[t, i] = self.m.addVar(lb=0, ub=cap, vtype=GRB.CONTINUOUS, name=f"h_{t}_{i}")
+                    h_id = self.hVarList[t][i]
+                    self.h[t, i] = self.model.addVar(lb=0, ub=cap, vtype=GRB.CONTINUOUS, name=f"h{h_id}")
                 
                 for j in range(num_nodes):
                     if i != j and self.adjMatrx[i][j] != 0:
                         var_id = self.xVarList[t][i][j]
-                        self.x[t, i, j] = self.m.addVar(vtype=GRB.BINARY, name=f"x{var_id}")
+                        self.x[t, i, j] = self.model.addVar(vtype=GRB.BINARY, name=f"x{var_id}")
 
         # ==================== Objective Function ====================
         
@@ -76,29 +74,29 @@ class PDP_MIP(PDP_reform):
             cost = self.my_round_int(self.vehicleList[t][1] * self.locaList[i][j])
             obj_expr += cost * self.x[t, i, j]
                 
-        self.m.setObjective(obj_expr, GRB.MINIMIZE)
+        self.model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # ==================== Base Constraints ====================
         
         # Eq.2: Mandatory Request Assignment (Exactly-One)
         for r in range(num_reqs):
-            self.m.addConstr(gp.quicksum(self.y[r, t] for t in range(num_vehs)) == 1)
+            self.model.addConstr(gp.quicksum(self.y[r, t] for t in range(num_vehs)) == 1)
 
         # Eq.3 & Eq.4: Node Visitation Linkage
         for r in range(num_reqs):
             pickup = self.requestList[r][1]
             dropoff = self.requestList[r][2]
             for t in range(num_vehs):
-                self.m.addConstr(gp.quicksum(self.x[t, k, pickup] for k in range(num_nodes) if (t, k, pickup) in self.x) >= self.y[r, t])
-                self.m.addConstr(gp.quicksum(self.x[t, k, dropoff] for k in range(num_nodes) if (t, k, dropoff) in self.x) >= self.y[r, t])
+                self.model.addConstr(gp.quicksum(self.x[t, k, pickup] for k in range(num_nodes) if (t, k, pickup) in self.x) >= self.y[r, t])
+                self.model.addConstr(gp.quicksum(self.x[t, k, dropoff] for k in range(num_nodes) if (t, k, dropoff) in self.x) >= self.y[r, t])
 
         # Eq.5 & Eq.6: Flow Balance and Degree Constraints
         for t in range(num_vehs):
             for j in range(num_nodes):
                 in_edges = [self.x[t, i, j] for i in range(num_nodes) if (t, i, j) in self.x]
                 out_edges = [self.x[t, j, k] for k in range(num_nodes) if (t, j, k) in self.x]
-                self.m.addConstr(gp.quicksum(in_edges) == gp.quicksum(out_edges))
-                self.m.addConstr(gp.quicksum(out_edges) <= 1)
+                self.model.addConstr(gp.quicksum(in_edges) == gp.quicksum(out_edges))
+                self.model.addConstr(gp.quicksum(out_edges) <= 1)
 
         # ==================== Strategy-Specific Topologies ====================
         if self.bc_strategy in ['static', 'hybrid']:
@@ -107,7 +105,7 @@ class PDP_MIP(PDP_reform):
                 for j in range(self.lenOfLocation):
                     for k in range(self.lenOfLocation):
                         if j != k and (t, j, k) in self.x:
-                            self.m.addConstr(self.u[t, j] - self.u[t, k] + n * self.x[t, j, k] <= n - 1)
+                            self.model.addConstr(self.u[t, j] - self.u[t, k] + n * self.x[t, j, k] <= n - 1)
 
             # Eq.8: Physical Precedence Constraints
             for r in range(num_reqs):
@@ -115,7 +113,7 @@ class PDP_MIP(PDP_reform):
                 dropoff = self.requestList[r][2]
                 if pickup != dropoff:
                     for t in range(num_vehs):
-                        self.m.addConstr(self.u[t, pickup] - self.u[t, dropoff] + n * self.y[r, t] <= n - 1)
+                        self.model.addConstr(self.u[t, pickup] - self.u[t, dropoff] + n * self.y[r, t] <= n - 1)
 
         if self.bc_strategy == 'static':
             node_demand = {i: 0 for i in range(num_nodes)}
@@ -130,15 +128,15 @@ class PDP_MIP(PDP_reform):
 
             # Eq. Capacity: Tight Bilateral Bounding
             for t in range(num_vehs):
-                self.m.addConstr(self.h[t, self.DEPOT] == 0)
+                self.model.addConstr(self.h[t, self.DEPOT] == 0)
                 for i in range(num_nodes):
                     for j in range(num_nodes):
                         if i != j and (t, i, j) in self.x:
                             delta_j = node_demand[j]
-                            self.m.addConstr(
+                            self.model.addConstr(
                                 self.h[t, j] - self.h[t, i] >= delta_j - M * (1 - self.x[t, i, j])
                             )
-                            self.m.addConstr(
+                            self.model.addConstr(
                                 self.h[t, j] - self.h[t, i] <= delta_j + M * (1 - self.x[t, i, j])
                             )
 
@@ -147,7 +145,7 @@ class PDP_MIP(PDP_reform):
         # Symmetry Breaking for Homogeneous Fleet
         for t in range(1, num_vehs):
             for r in range(num_reqs):
-                self.m.addConstr(self.y[r, t] <= gp.quicksum(self.y[prev_r, t-1] for prev_r in range(r)))
+                self.model.addConstr(self.y[r, t] <= gp.quicksum(self.y[prev_r, t-1] for prev_r in range(r)))
 
         # Active Vehicle Pruning (EVP)
         for t in range(num_vehs):
@@ -155,18 +153,18 @@ class PDP_MIP(PDP_reform):
             for i in range(num_nodes):
                 for j in range(num_nodes):
                     if (t, i, j) in self.x:
-                        self.m.addConstr(self.x[t, i, j] <= vehicle_is_active)
+                        self.model.addConstr(self.x[t, i, j] <= vehicle_is_active)
 
         # ==================== Metadata for Callbacks ====================
-        self.m._x = self.x
-        self.m._y = self.y
-        self.m._DEPOT = self.DEPOT
-        self.m._num_vehs = num_vehs
-        self.m._num_reqs = num_reqs
-        self.m._cap = int(self.vehicleList[0][0])
-        self.m._demand = {r: self.requestList[r][0] for r in range(num_reqs)}
-        self.m._pickup = {r: self.requestList[r][1] for r in range(num_reqs)}
-        self.m._dropoff = {r: self.requestList[r][2] for r in range(num_reqs)}
+        self.model._x = self.x
+        self.model._y = self.y
+        self.model._DEPOT = self.DEPOT
+        self.model._num_vehs = num_vehs
+        self.model._num_reqs = num_reqs
+        self.model._cap = int(self.vehicleList[0][0])
+        self.model._demand = {r: self.requestList[r][0] for r in range(num_reqs)}
+        self.model._pickup = {r: self.requestList[r][1] for r in range(num_reqs)}
+        self.model._dropoff = {r: self.requestList[r][2] for r in range(num_reqs)}
 
 
     # ==========================================
@@ -344,13 +342,16 @@ class PDP_MIP(PDP_reform):
                         break
 
     def solve(self, time_limit=3600, assumption_file=None):
-        self.genGurobiModel()
+        self.genMipModel()
         
         if time_limit is not None:
             print(f"[Gurobi {self.bc_strategy}_bc] Setting time limit to {time_limit} seconds")
-            self.m.setParam('TimeLimit', time_limit)
+            self.model.setParam('TimeLimit', time_limit)
             
-        self.m.setParam('Threads', 1) 
+        self.model.setParam('Threads', 1) 
+        
+        # Enable Lazy Constraints (Required for both strategies)
+        self.model.setParam('LazyConstraints', 1)
 
         log_file = f"{self.insName}.out"
         with open(log_file, "w") as f:
@@ -394,18 +395,18 @@ class PDP_MIP(PDP_reform):
                     self.full_benders_callback(model, where)
 
             # Callback Routing based on strategy using the combined callback
-            self.m.optimize(combined_callback)
+            self.model.optimize(combined_callback)
             
             elapsed = time.time() - start_time
 
-            if self.m.Status == gp.GRB.OPTIMAL or self.m.Status == gp.GRB.TIME_LIMIT:
-                if self.m.SolCount > 0:
-                    raw_model = [v.VarName for v in self.m.getVars() if v.X > 0.5 and (v.VarName.startswith('x') or v.VarName.startswith('y'))]
+            if self.model.Status == gp.GRB.OPTIMAL or self.model.Status == gp.GRB.TIME_LIMIT:
+                if self.model.SolCount > 0:
+                    raw_model = [v.VarName for v in self.model.getVars() if v.X > 0.5 and (v.VarName.startswith('x') or v.VarName.startswith('y'))]
                     filtered_model = PDP_utils.convert_model(raw_model)
 
-                    log(f"[Gurobi {self.bc_strategy}] Status: {self.m.Status}")
-                    log(f"[Gurobi {self.bc_strategy}] BEST OBJ: {self.m.ObjVal}")
-                    log(f"[Gurobi {self.bc_strategy}] BEST BOUND: {self.m.ObjBound}")
+                    log(f"[Gurobi {self.bc_strategy}] Status: {self.model.Status}")
+                    log(f"[Gurobi {self.bc_strategy}] BEST OBJ: {self.model.ObjVal}")
+                    log(f"[Gurobi {self.bc_strategy}] BEST BOUND: {self.model.ObjBound}")
                     log(f"[Gurobi {self.bc_strategy}] Runtime: {elapsed:.3f} sec")
                     
                     PDP_utils.printVehRoutes(self, filtered_model, log_file)
@@ -414,10 +415,10 @@ class PDP_MIP(PDP_reform):
                 else:
                     log(f"[Gurobi {self.bc_strategy}] Reached Time Limit, NO feasible solution.")
                     try:
-                        best_bound = self.m.ObjBound
+                        best_bound = self.model.ObjBound
                         log(f"Best objective -, best bound {best_bound}")
                     except:
                         pass
             else:
-                log(f"[Gurobi {self.bc_strategy}] Failed to find solution. Status: {self.m.Status}")
+                log(f"[Gurobi {self.bc_strategy}] Failed to find solution. Status: {self.model.Status}")
             return None

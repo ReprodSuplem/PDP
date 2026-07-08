@@ -10,50 +10,62 @@ from ppdsp_utils import PPDSP_utils
 class PPDSP_MIP(PPDSP_reform):
     def __init__(self, pdpName, num_reqs, num_vehs, capacity, knn, increment=None, bc_strategy='hybrid'):
         super().__init__(pdpName, num_reqs, num_vehs, capacity, knn, increment)
+        self.knn = int(knn)
         self.bc_strategy = bc_strategy.lower()
         
         self.env = gp.Env(empty=True)
         self.env.setParam("OutputFlag", 1)
         self.env.start()
-        self.model = gp.Model(f"PPDSP_{pdpName}", env=self.env)
         
+        # Semantic model naming for academic rigorousness
         strategy_suffix = "static" if self.bc_strategy == 'static' else f"{self.bc_strategy}_bc"
         self.insName = f"ppdsp_{pdpName}_r{num_reqs}v{num_vehs}k{knn}_{strategy_suffix}"
+        self.model = gp.Model(self.insName, env=self.env)
         
-        self.y = {} 
         self.x = {} 
-        self.u = {} 
+        self.y = {} 
+        self.u = {}
+        self.h = {}
         
     def genMipModel(self):
         self.genXVarList()
         self.genYVarList()
 
+        if self.bc_strategy in ['hybrid', 'static']:
+            self.genUVarList()
+        if self.bc_strategy == 'static':
+            self.genHVarList()
+
+        self.DEPOT = self.lenOfLocation
         num_nodes = 1 + self.lenOfLocation
-        DEPOT = self.lenOfLocation
         num_reqs = self.lenOfRequest
         num_vehs = self.lenOfVehicle
+        n = self.lenOfLocation
 
         # ==================== Variable Declaration ====================
         cap = self.vehicleList[0][0]
-        if self.bc_strategy == 'static':
-            self.h = {}
 
         for t in range(num_vehs):
             for r in range(num_reqs):
-                self.y[r, t] = self.model.addVar(vtype=GRB.BINARY, name=f"y_r{r}_t{t}")
+                var_id = self.yVarList[r][t]
+                self.y[r, t] = self.model.addVar(vtype=GRB.BINARY, name=f"y{var_id}")
                 
             for i in range(num_nodes):
-                if self.bc_strategy in ['static', 'hybrid']:
-                    self.u[t, i] = self.model.addVar(lb=0, ub=num_nodes, vtype=GRB.CONTINUOUS, name=f"u_t{t}_i{i}")
+                if self.bc_strategy in ['static', 'hybrid'] and i < self.DEPOT:
+                    u_id = self.uVarList[t][i]
+                    self.u[t, i] = self.model.addVar(lb=0, ub=n-1, vtype=GRB.CONTINUOUS, name=f"u{u_id}")
                 
                 if self.bc_strategy == 'static':
-                    self.h[t, i] = self.model.addVar(lb=0, ub=cap, vtype=GRB.CONTINUOUS, name=f"h_t{t}_i{i}")
+                    h_id = self.hVarList[t][i]
+                    self.h[t, i] = self.model.addVar(lb=0, ub=cap, vtype=GRB.CONTINUOUS, name=f"h{h_id}")
                     
                 for j in range(num_nodes):
                     if i == j:
-                        self.x[t, i, i] = self.model.addVar(vtype=GRB.BINARY, name=f"x_t{t}_i{i}_j{i}")
+                        var_id = self.xVarList[t][i][i]
+                        self.x[t, i, i] = self.model.addVar(vtype=GRB.BINARY, name=f"x{var_id}")
                     elif self.adjMatrx[i][j] != 0:
-                        self.x[t, i, j] = self.model.addVar(vtype=GRB.BINARY, name=f"x_t{t}_i{i}_j{j}")
+                        var_id = self.xVarList[t][i][j]
+                        self.x[t, i, j] = self.model.addVar(vtype=GRB.BINARY, name=f"x{var_id}")
                     else:
                         self.x[t, i, j] = None
 
@@ -90,10 +102,10 @@ class PPDSP_MIP(PPDSP_reform):
             is_used = self.model.addVar(vtype=GRB.BINARY, name=f"is_used_t{t}")
             for r in range(num_reqs):
                 self.model.addConstr(is_used >= self.y[r, t])
-            self.model.addConstr(self.x[t, DEPOT, DEPOT] == 1 - is_used)
+            self.model.addConstr(self.x[t, self.DEPOT, self.DEPOT] == 1 - is_used)
 
             for i in range(num_nodes):
-                if i != DEPOT:
+                if i != self.DEPOT:
                     reqs_pickup = [r for r in range(num_reqs) if self.requestList[r][2] == i]
                     reqs_delivery = [r for r in range(num_reqs) if self.requestList[r][3] == i]
                     
@@ -106,8 +118,8 @@ class PPDSP_MIP(PPDSP_reform):
                     self.model.addConstr(out_flow == is_active_i, name=f"c4_out_t{t}_i{i}")
                     self.model.addConstr(self.x[t, i, i] == 1 - is_active_i, name=f"c5_self_t{t}_i{i}")
 
-            depot_in = gp.quicksum(self.x[t, j, DEPOT] for j in range(num_nodes) if DEPOT != j and self.x[t, j, DEPOT] is not None)
-            depot_out = gp.quicksum(self.x[t, DEPOT, j] for j in range(num_nodes) if DEPOT != j and self.x[t, DEPOT, j] is not None)
+            depot_in = gp.quicksum(self.x[t, j, self.DEPOT] for j in range(num_nodes) if self.DEPOT != j and self.x[t, j, self.DEPOT] is not None)
+            depot_out = gp.quicksum(self.x[t, self.DEPOT, j] for j in range(num_nodes) if self.DEPOT != j and self.x[t, self.DEPOT, j] is not None)
             
             self.model.addConstr(depot_out == is_used, name=f"c6_depot_out_t{t}")
             self.model.addConstr(depot_in == is_used, name=f"c7_depot_in_t{t}")
@@ -115,12 +127,11 @@ class PPDSP_MIP(PPDSP_reform):
         # MTZ Subtour & Precedence
         if self.bc_strategy in ['static', 'hybrid']:
             for t in range(num_vehs):
-                self.model.addConstr(self.u[t, DEPOT] == 0)
-                for i in range(num_nodes):
-                    for j in range(num_nodes):
-                        if i != j and j != DEPOT and self.x[t, i, j] is not None:
+                for i in range(n):
+                    for j in range(n):
+                        if i != j and self.x[t, i, j] is not None:
                             self.model.addConstr(
-                                self.u[t, i] - self.u[t, j] + 1 <= num_nodes * (1 - self.x[t, i, j]),
+                                self.u[t, i] - self.u[t, j] + n * self.x[t, i, j] <= n - 1,
                                 name=f"mtz_t{t}_i{i}_j{j}"
                             )
                 
@@ -130,7 +141,7 @@ class PPDSP_MIP(PPDSP_reform):
                     d_node = self.requestList[r][3]
                     if p_node != d_node:
                         self.model.addConstr(
-                            self.u[t, p_node] <= self.u[t, d_node] - 1 + num_nodes * (1 - self.y[r, t]),
+                            self.u[t, p_node] - self.u[t, d_node] + n * self.y[r, t] <= n - 1,
                             name=f"prec_t{t}_r{r}"
                         )
                         
@@ -148,7 +159,7 @@ class PPDSP_MIP(PPDSP_reform):
                 node_demand[dp] -= dem
 
             for t in range(num_vehs):
-                self.model.addConstr(self.h[t, DEPOT] == 0)
+                self.model.addConstr(self.h[t, self.DEPOT] == 0)
                 for i in range(num_nodes):
                     for j in range(num_nodes):
                         if i != j and self.x[t, i, j] is not None:
