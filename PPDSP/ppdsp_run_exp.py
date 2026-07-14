@@ -83,7 +83,7 @@ def main():
             for method in METHODS:
                 if method == "static":
                     cmd = f"python ppdsp_main.py mip {inst} {req} --knn {k} --mip_strategy static --time {TIME_LIMIT}"
-                if method == "maxsat":
+                elif method == "maxsat":
                     cmd = f"python ppdsp_main.py sat {inst} {req} --knn {k} --time {TIME_LIMIT}"
                 elif method == "cpsat":
                     cmd = f"python ppdsp_main.py cpsat {inst} {req} --knn {k} --time {TIME_LIMIT}"

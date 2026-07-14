@@ -24,27 +24,31 @@ def parse_log_file(filepath):
         content = f.read()
 
         # Check for explicit timeout indicators
-        if re.search(r"Time limit reached", content) or re.search(r"\[UWrMaxSAT\] Timeout", content) or re.search(r"NO feasible solution", content):
+        if re.search(r"Time limit reached", content, re.IGNORECASE) or re.search(r"\[UWrMaxSAT\] Timeout", content) or re.search(r"NO feasible solution", content, re.IGNORECASE):
             is_timeout = True
 
         # Extract Objective and Bound
         if method == "maxsat":
-            obj_match = re.search(r"\[UWrMaxSAT\] OBJ:\s*([\d\.]+)", content)
+            obj_match = re.search(r"\[UWrMaxSAT\] OBJ:\s*([-\d\.]+)", content)
             if obj_match:
                 obj = float(obj_match.group(1))
 
         elif method == "cpsat":
-            obj_match = re.search(r"FINAL OBJ:\s*([\d\.]+)", content)
-            if not obj_match:
-                obj_match = re.search(r"objective:\s*([\d\.]+)", content)
-            bound_match = re.search(r"best_bound:\s*([\d\.]+)", content)
-            
-            if obj_match: obj = float(obj_match.group(1))
-            if bound_match: bound = float(bound_match.group(1))
+            obj_match = re.search(r"(?:FINAL OBJ:|objective:)\s*([-\d\.]+)", content, re.IGNORECASE)
+            if obj_match: 
+                obj = float(obj_match.group(1))
+                
+            bound_match = re.search(r"(?:best_bound:|best bound)\s*([-\d\.]+)", content, re.IGNORECASE)
+            if bound_match: 
+                bound = float(bound_match.group(1))
+            else:
+                inc_bounds = re.findall(r"Bound:\s*([-\d\.]+)", content, re.IGNORECASE)
+                if inc_bounds:
+                    bound = float(inc_bounds[-1])
 
         elif method in ["static", "hybrid_bc", "full_bc"]:
-            obj_bound_match = re.search(r"BEST OBJ:\s*([-\d\.]+).*?BEST BOUND:\s*([-\d\.]+)", content, re.DOTALL)
-            opt_match = re.search(r"Optimal objective\s+([\d\.\-]+)", content)
+            obj_bound_match = re.search(r"(?:BEST OBJ:|Best objective)\s*([-\d\.]+).*?(?:BEST BOUND:|best bound)\s*([-\d\.]+)", content, re.IGNORECASE | re.DOTALL)
+            opt_match = re.search(r"Optimal objective\s+([-\d\.]+)", content, re.IGNORECASE)
             
             if obj_bound_match:
                 o_val = obj_bound_match.group(1)
@@ -55,18 +59,18 @@ def parse_log_file(filepath):
                 obj = float(opt_match.group(1))
                 bound = obj
 
-        # Extract Total Time
+        # Extract Total Time & Incumbent Time
         if method == "maxsat":
             time_match = re.search(r"CPU time\s*:\s*([\d\.]+)\s*s", content)
             if time_match: total_time = float(time_match.group(1))
         elif method == "cpsat":
-            time_match = re.search(r"\[CP-SAT\] Total Runtime:\s*([\d\.]+)\s*sec", content)
+            time_match = re.search(r"\[CP-SAT\] Total Runtime:\s*([\d\.]+)\s*sec", content, re.IGNORECASE)
             if time_match: total_time = float(time_match.group(1))
         elif method in ["static", "hybrid_bc", "full_bc"]:
-            time_match = re.search(r"Runtime:\s*([\d\.]+)\s*sec", content)
+            time_match = re.search(r"Runtime:\s*([\d\.]+)\s*sec", content, re.IGNORECASE)
             if time_match: total_time = float(time_match.group(1))
 
-        # Adjust timeout flag based on total time
+        # Adjust timeout flag based on total time (3600s boundary)
         if total_time is not None and total_time >= 3590.0:
             is_timeout = True
             
@@ -80,21 +84,20 @@ def parse_log_file(filepath):
                 if matches:
                     incumbent_time = float(matches[-1][0])
                 elif re.search(r"c Found solution:", content):
-                    incumbent_time = 0.01 # Instant first solution without elapsed time print
+                    incumbent_time = 0.01 
             elif method == "cpsat":
-                matches = re.findall(r"\[Incumbent\s*\d+\] Time:\s*([\d\.]+)s", content)
+                matches = re.findall(r"\[Incumbent\s*\d+\] Time:\s*([\d\.]+)s", content, re.IGNORECASE)
                 if matches:
                     incumbent_time = float(matches[-1])
             elif method in ["static", "hybrid_bc", "full_bc"]:
-                matches = re.findall(r"\[(?:MIP )?Incumbent\] Time:\s*([\d\.]+)s", content)
+                matches = re.findall(r"\[(?:MIP )?Incumbent\] Time:\s*([\d\.]+)s", content, re.IGNORECASE)
                 if matches:
                     incumbent_time = float(matches[-1])
                         
-            # Fallback: if no incumbent log matched the final objective, use total time
             if incumbent_time is None and total_time is not None:
                 incumbent_time = total_time
 
-        # Assign bound if optimality was proven and no explicit bound was logged
+        # If it finished optimally, the bound MUST be equal to the objective
         if not is_timeout and pd.notna(obj) and pd.isna(bound):
             bound = obj
 
@@ -115,10 +118,13 @@ def parse_log_file(filepath):
 
 def main():
     log_dir = "."
-    results = []
+    if not os.path.exists(log_dir):
+        print(f"Directory '{log_dir}' not found.")
+        return
 
+    results = []
     for filename in os.listdir(log_dir):
-        if filename.endswith(".out") and filename.startswith("pdp_"):
+        if filename.endswith(".out"):
             filepath = os.path.join(log_dir, filename)
             res = parse_log_file(filepath)
             if res:
@@ -154,11 +160,13 @@ def main():
                 gap = ((obj - bkb) / obj) * 100.0
                 df.loc[idx, 'Gap(%)'] = max(0.0, round(gap, 2))
 
-    cols = ['Instance', 'Requests', 'K', 'Method', 'HasFeasible', 'Timeout', 'Objective', 'BestBound', 'BKB', 'Gap(%)', 'Time_to_Best(s)', 'Total_Time(s)']
+    cols = ['Instance', 'Requests', 'K', 'Method', 'HasFeasible', 'Timeout', 
+            'Objective', 'BestBound', 'BKB', 'Gap(%)', 'Time_to_Best(s)', 'Total_Time(s)']
     df = df[cols]
-    
-    output_file = "pdp_results.csv"
-    df.to_csv(output_file, index=False)
+
+    output_csv = "pdp_results.csv"
+    df.to_csv(output_csv, index=False)
+    print(f"Results successfully saved to {output_csv}")
 
 if __name__ == "__main__":
     main()
