@@ -24,91 +24,93 @@ def parse_log_file(filepath):
         content = f.read()
 
         # Check for explicit timeout indicators
-        if re.search(r"Time limit reached", content, re.IGNORECASE) or re.search(r"\[UWrMaxSAT\] Timeout", content) or re.search(r"NO feasible solution", content, re.IGNORECASE):
+        if re.search(r"Time limit reached", content, re.IGNORECASE) or \
+           re.search(r"\[UWrMaxSAT\] Timeout", content) or \
+           re.search(r"NO feasible solution", content, re.IGNORECASE) or \
+           re.search(r"\[Gurobi\] Status: 9", content):
             is_timeout = True
 
-        # Extract Objective and Bound
+        # Extract all incumbents systematically
+        incumbents = re.findall(r"\[Incumbent.*?\]\s*Time:\s*([\d\.]+)s\s*\|\s*Obj:\s*([-\d\.]+)(?:\s*\|\s*Bound:\s*([-\d\.]+))?", content)
+
+        # Extract Objective and Bound based on solver types
         if method == "maxsat":
             obj_match = re.search(r"\[UWrMaxSAT\] OBJ:\s*([-\d\.]+)", content)
             if obj_match:
                 obj = float(obj_match.group(1))
 
+            bound_match = re.search(r"\[UWrMaxSAT\] BOUND:\s*([-\d\.]+)", content)
+            if bound_match:
+                bound = float(bound_match.group(1))
+
+            time_match = re.search(r"c CPU time\s*:\s*([\d\.]+)\s*s", content)
+            if time_match:
+                total_time = float(time_match.group(1))
+                
+            if not re.search(r"OPTIMUM FOUND", content) and not re.search(r"SATISFIABLE", content):
+                is_timeout = True
+
         elif method == "cpsat":
             obj_match = re.search(r"(?:FINAL OBJ:|objective:)\s*([-\d\.]+)", content, re.IGNORECASE)
-            if obj_match: 
+            if obj_match:
                 obj = float(obj_match.group(1))
-                
-            bound_match = re.search(r"(?:best_bound:|best bound)\s*([-\d\.]+)", content, re.IGNORECASE)
-            if bound_match: 
+
+            bound_match = re.search(r"(?:BEST BOUND:|best bound:)\s*([-\d\.]+)", content, re.IGNORECASE)
+            if bound_match:
                 bound = float(bound_match.group(1))
-            else:
-                inc_bounds = re.findall(r"Bound:\s*([-\d\.]+)", content, re.IGNORECASE)
-                if inc_bounds:
-                    bound = float(inc_bounds[-1])
 
-        elif method in ["static", "hybrid_bc", "full_bc"]:
-            obj_bound_match = re.search(r"(?:BEST OBJ:|Best objective)\s*([-\d\.]+).*?(?:BEST BOUND:|best bound)\s*([-\d\.]+)", content, re.IGNORECASE | re.DOTALL)
-            opt_match = re.search(r"Optimal objective\s+([-\d\.]+)", content, re.IGNORECASE)
-            
-            if obj_bound_match:
-                o_val = obj_bound_match.group(1)
-                b_val = obj_bound_match.group(2)
-                if o_val != '-': obj = float(o_val)
-                if b_val != '-': bound = float(b_val)
-            elif opt_match:
-                obj = float(opt_match.group(1))
-                bound = obj
+            time_match = re.search(r"Total Runtime:\s*([\d\.]+)\s*sec", content, re.IGNORECASE)
+            if time_match:
+                total_time = float(time_match.group(1))
 
-        # Extract Total Time & Incumbent Time
-        if method == "maxsat":
-            time_match = re.search(r"CPU time\s*:\s*([\d\.]+)\s*s", content)
-            if time_match: total_time = float(time_match.group(1))
-        elif method == "cpsat":
-            time_match = re.search(r"\[CP-SAT\] Total Runtime:\s*([\d\.]+)\s*sec", content, re.IGNORECASE)
-            if time_match: total_time = float(time_match.group(1))
-        elif method in ["static", "hybrid_bc", "full_bc"]:
-            time_match = re.search(r"Runtime:\s*([\d\.]+)\s*sec", content, re.IGNORECASE)
-            if time_match: total_time = float(time_match.group(1))
+        elif method in ["full_bc", "hybrid_bc", "static", "mip"]:
+            obj_match = re.search(r"\[Gurobi\] BEST OBJ:\s*([-\d\.]+)", content)
+            if obj_match:
+                obj = float(obj_match.group(1))
 
-        # Adjust timeout flag based on total time (3600s boundary)
-        if total_time is not None and total_time >= 3590.0:
-            is_timeout = True
-            
-        if total_time is None and is_timeout:
-            total_time = 3600.0
+            bound_match = re.search(r"\[Gurobi\] BEST BOUND:\s*([-\d\.]+)", content)
+            if bound_match:
+                bound = float(bound_match.group(1))
 
-        # Extract Time to Best Incumbent
-        if pd.notna(obj):
-            if method == "maxsat":
-                matches = re.findall(r"c \[Elapsed time\]\s*([\d\.]+)\s*s\s*c Found solution:\s*([-\d\.]+)", content)
-                if matches:
-                    incumbent_time = float(matches[-1][0])
-                elif re.search(r"c Found solution:", content):
-                    incumbent_time = 0.01 
-            elif method == "cpsat":
-                matches = re.findall(r"\[Incumbent\s*\d+\] Time:\s*([\d\.]+)s", content, re.IGNORECASE)
-                if matches:
-                    incumbent_time = float(matches[-1])
-            elif method in ["static", "hybrid_bc", "full_bc"]:
-                matches = re.findall(r"\[(?:MIP )?Incumbent\] Time:\s*([\d\.]+)s", content, re.IGNORECASE)
-                if matches:
-                    incumbent_time = float(matches[-1])
-                        
-            if incumbent_time is None and total_time is not None:
-                incumbent_time = total_time
+            time_match = re.search(r"\[Gurobi\] Runtime:\s*([\d\.]+)\s*sec", content)
+            if time_match:
+                total_time = float(time_match.group(1))
 
-        # If it finished optimally, the bound MUST be equal to the objective
-        if not is_timeout and pd.notna(obj) and pd.isna(bound):
-            bound = obj
+        # Universal fallback: Extract true objective from the evaluation block if solver objective is missing
+        eval_match = re.search(r"Objective Value\s*=\s*([-\d\.]+)", content)
+        if eval_match:
+            eval_obj = float(eval_match.group(1))
+            if pd.isna(obj) or (obj == 0.0 and eval_obj > 0.0):
+                obj = eval_obj
 
-        has_feasible = pd.notna(obj)
+        # Crucial Fallback: Extract bound from the last recorded incumbent
+        if pd.isna(bound) and incumbents:
+            last_bound_str = incumbents[-1][2]
+            if last_bound_str:
+                bound = float(last_bound_str)
+
+        # Time to Best calculation
+        if pd.notna(obj) and obj > 0 and incumbents:
+            for t_str, o_str, _ in incumbents:
+                if abs(float(o_str) - obj) < 1e-5:
+                    incumbent_time = float(t_str)
+                    break
+        
+        if incumbent_time is None and total_time is not None:
+            incumbent_time = total_time
+
+    # Sanitize inputs: Neutralize mathematical negative zeros
+    if pd.notna(obj) and obj == 0.0:
+        obj = 0.0
+    if pd.notna(bound) and bound == 0.0:
+        bound = 0.0
 
     return {
         "Instance": instance,
         "Requests": reqs,
         "K": k_val,
         "Method": method,
-        "HasFeasible": has_feasible,
+        "HasFeasible": pd.notna(obj),
         "Timeout": is_timeout,
         "Objective": obj,
         "BestBound": bound,
@@ -116,19 +118,15 @@ def parse_log_file(filepath):
         "Total_Time(s)": total_time
     }
 
-def main():
-    log_dir = "."
-    if not os.path.exists(log_dir):
-        print(f"Directory '{log_dir}' not found.")
-        return
-
+def process_results(log_directory):
     results = []
-    for filename in os.listdir(log_dir):
-        if filename.endswith(".out"):
-            filepath = os.path.join(log_dir, filename)
-            res = parse_log_file(filepath)
-            if res:
-                results.append(res)
+    for root, dirs, files in os.walk(log_directory):
+        for file in files:
+            if file.endswith(".out"):
+                filepath = os.path.join(root, file)
+                res = parse_log_file(filepath)
+                if res:
+                    results.append(res)
 
     df = pd.DataFrame(results)
     if df.empty:
@@ -139,34 +137,54 @@ def main():
     df['BKB'] = np.nan
     df['Gap(%)'] = np.nan
 
-    # Dynamic BKB Calculation for Maximization
+    # Robust BKB Calculation and Gap Computation
     for (inst, req, k_val), group in df.groupby(['Instance', 'Requests', 'K']):
-        optimal_runs = group[(group['Timeout'] == False) & (group['Objective'].notna())]
         
-        if not optimal_runs.empty:
-            bkb = optimal_runs['Objective'].max()
+        valid_objs = group['Objective'].dropna()
+        global_max_obj = valid_objs.max() if not valid_objs.empty else 0.0
+        
+        # Explicit Invalidation: Nullify bounds that are mathematically impossible 
+        # (i.e., less than the best known objective discovered by any solver).
+        for idx in group.index:
+            bb = df.loc[idx, 'BestBound']
+            if pd.notna(bb) and bb < global_max_obj - 1e-5:
+                df.loc[idx, 'BestBound'] = np.nan
+                
+        # Re-fetch valid bounds after sanitization
+        valid_bounds = df.loc[group.index, 'BestBound'].dropna()
+        
+        # Identify valid optimal runs
+        optimal_runs = group[(group['Timeout'] == False) & (group['Objective'].notna())]
+        trusted_optimals = optimal_runs[optimal_runs['Objective'] >= global_max_obj - 1e-5]
+        
+        # Determine Best Known Bound (BKB)
+        if not trusted_optimals.empty:
+            bkb = trusted_optimals['Objective'].max()
         else:
-            valid_bounds = group['BestBound'].dropna()
             if not valid_bounds.empty:
-                bkb = valid_bounds.min() 
+                bkb = valid_bounds.min()
             else:
                 bkb = np.nan
                 
         df.loc[group.index, 'BKB'] = bkb
         
+        # Compute closed gap
         for idx in group.index:
             obj = df.loc[idx, 'Objective']
-            if pd.notna(obj) and pd.notna(bkb) and obj > 0:
-                gap = ((bkb - obj) / obj) * 100.0
-                df.loc[idx, 'Gap(%)'] = max(0.0, round(gap, 2))
+            if pd.notna(obj) and pd.notna(bkb):
+                if obj == 0.0:
+                    df.loc[idx, 'Gap(%)'] = np.inf if bkb > 0.0 else 0.0
+                else:
+                    gap = ((bkb - obj) / obj) * 100.0
+                    df.loc[idx, 'Gap(%)'] = max(0.0, round(gap, 2))
 
     cols = ['Instance', 'Requests', 'K', 'Method', 'HasFeasible', 'Timeout', 
             'Objective', 'BestBound', 'BKB', 'Gap(%)', 'Time_to_Best(s)', 'Total_Time(s)']
     df = df[cols]
-
-    output_csv = "ppdsp_results.csv"
-    df.to_csv(output_csv, index=False)
-    print(f"Results successfully saved to {output_csv}")
+    
+    output_path = "ppdsp_results.csv"
+    df.to_csv(output_path, index=False)
+    print(f"Results successfully saved to {output_path}")
 
 if __name__ == "__main__":
-    main()
+    process_results("./")
