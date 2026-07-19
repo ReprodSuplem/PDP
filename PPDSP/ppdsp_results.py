@@ -63,6 +63,9 @@ def parse_log_file(filepath):
             if time_match:
                 total_time = float(time_match.group(1))
 
+            if not re.search(r"\[CP-SAT\] Status:\s*(OPTIMAL|INFEASIBLE)", content, re.IGNORECASE):
+                is_timeout = True
+
         elif method in ["full_bc", "hybrid_bc", "static", "mip"]:
             obj_match = re.search(r"\[Gurobi\] BEST OBJ:\s*([-\d\.]+)", content)
             if obj_match:
@@ -104,6 +107,10 @@ def parse_log_file(filepath):
         obj = 0.0
     if pd.notna(bound) and bound == 0.0:
         bound = 0.0
+
+    if method in ["full_bc", "hybrid_bc", "static", "mip"]:
+        if pd.notna(obj) and obj == 0.0 and pd.notna(bound) and bound == 0.0:
+            is_timeout = True
 
     return {
         "Instance": instance,
@@ -149,6 +156,7 @@ def process_results(log_directory):
             bb = df.loc[idx, 'BestBound']
             if pd.notna(bb) and bb < global_max_obj - 1e-5:
                 df.loc[idx, 'BestBound'] = np.nan
+                df.loc[idx, 'Timeout'] = True
                 
         # Re-fetch valid bounds after sanitization
         valid_bounds = df.loc[group.index, 'BestBound'].dropna()
@@ -177,6 +185,13 @@ def process_results(log_directory):
                 else:
                     gap = ((bkb - obj) / obj) * 100.0
                     df.loc[idx, 'Gap(%)'] = max(0.0, round(gap, 2))
+
+    # Standardize timeout metrics
+    for idx in df.index:
+        if df.loc[idx, 'Timeout']:
+            tt = df.loc[idx, 'Total_Time(s)']
+            if pd.isna(tt) or tt < 3600.0:
+                df.loc[idx, 'Total_Time(s)'] = 3600.0
 
     cols = ['Instance', 'Requests', 'K', 'Method', 'HasFeasible', 'Timeout', 
             'Objective', 'BestBound', 'BKB', 'Gap(%)', 'Time_to_Best(s)', 'Total_Time(s)']
