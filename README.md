@@ -17,7 +17,14 @@ To run the scripts and solvers, ensure you have the following dependencies insta
 - `pandas`
 
 **External Solver Requirement:**
-The MaxSAT models rely on `uwrmaxsat`. You must compile `uwrmaxsat` and ensure its executable is available in your system's `PATH`.
+The MaxSAT models rely on `uwrmaxsat`. A build script is provided to compile the solver alongside its dependencies (COMiniSatPS, MaxPre, and SCIP) and configure the system `PATH`. Execute the following commands from the repository root:
+
+```bash
+cd UWrMaxSat-SCIP-MaxPre
+chmod +x code/starexec_build
+./code/starexec_build
+source ~/.bashrc
+```
 
 ## Repository Structure
 
